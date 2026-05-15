@@ -152,7 +152,8 @@ Content-Type: application/json
 
 ### 适配细节
 
-各 agent 框架的唤醒端点和认证方式可能不同，通过适配器配置定义。
+各 agent 框架的唤醒端点和认证方式通过 `bridge.yaml` 的 `body_template` 和 `auth` 字段定义。
+模板变量 `{{message}}` 和 `{{from}}` 会被替换为实际内容。详见 `docs/CUSTOMIZE.md`。
 
 Hermes Agent 示例：
 
@@ -160,9 +161,8 @@ Hermes Agent 示例：
 wakeup:
   url: "http://127.0.0.1:8644/webhooks/agent-reply"
   method: POST
-  format:
-    body:
-      message: "<message_text>"
+  body_template:
+    message: "{{message}}"
 ```
 
 OpenClaw 示例：
@@ -173,13 +173,13 @@ wakeup:
   method: POST
   auth:
     type: bearer
-    token_from: "~/.openclaw/openclaw.json -> gateway.auth.password"
-  format:
-    body:
-      tool: "sessions_send"
-      args:
-        sessionKey: "agent:main:main"
-        message: "[消息通道] <message_text>\n请回复并追加到 active.jsonl"
+    token_path: "~/.openclaw/openclaw.json"
+    token_jsonpath: "gateway.auth.password"
+  body_template:
+    tool: "sessions_send"
+    args:
+      sessionKey: "agent:main:main"
+      message: "{{message}}"
 ```
 
 ---

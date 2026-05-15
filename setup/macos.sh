@@ -35,7 +35,7 @@ if [[ -z "$CONFIG_PATH" ]]; then
 fi
 
 # 解析路径
-CONFIG_PATH="$(eval echo "$CONFIG_PATH")"
+CONFIG_PATH="${CONFIG_PATH/#\~/$HOME}"
 LABEL="com.agent-bridge.poll.$AGENT_ID"
 PLIST_PATH="$HOME/Library/LaunchAgents/$LABEL.plist"
 

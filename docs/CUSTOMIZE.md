@@ -155,7 +155,8 @@ agents:
 
 | 环境变量               | 用途                       |
 |----------------------|----------------------------|
-| `AGENT_BRIDGE_DIR`   | 覆盖 shared_dir            |
 | `AGENT_ID`           | 覆盖默认 agent_id          |
 
 在 cron/systemd 中设置环境变量，可以在不修改配置文件的情况下切换 agent。
+
+> 注：`AGENT_BRIDGE_DIR` 曾在旧版中使用，当前版本通过 `bridge.yaml` 的 `shared_dir` 字段配置。

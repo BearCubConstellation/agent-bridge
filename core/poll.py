@@ -15,6 +15,7 @@ Agent Bridge — 通用轮询检查脚本
     from poll import run_poll
     result = run_poll(config)
 """
+import copy
 import json
 import os
 import shutil
@@ -33,6 +34,8 @@ ARCHIVE_IDLE_MINUTES = 30
 # ─── 配置 ─────────────────────────────────────────────
 
 def load_config(config_path):
+    """读取配置文件。失败时抛出异常，不调用 sys.exit。"""
+    errors = []
     # 先尝试 yaml，失败再尝试 json
     try:
         import yaml
@@ -40,22 +43,17 @@ def load_config(config_path):
             return yaml.safe_load(f) or {}
     except ImportError:
         pass
-    except (FileNotFoundError, PermissionError):
-        print(f"ERROR: config file not found: {config_path}", file=sys.stderr)
-        sys.exit(1)
+    except (FileNotFoundError, PermissionError) as e:
+        errors.append(str(e))
     except Exception as e:
-        print(f"ERROR: invalid config: {e}", file=sys.stderr)
-        sys.exit(1)
+        errors.append(str(e))
     # json fallback
     try:
         with open(config_path) as f:
             return json.load(f)
-    except (FileNotFoundError, PermissionError):
-        print(f"ERROR: config file not found: {config_path}", file=sys.stderr)
-        sys.exit(1)
     except Exception as e:
-        print(f"ERROR: invalid config: {e}", file=sys.stderr)
-        sys.exit(1)
+        errors.append(str(e))
+    raise RuntimeError(f"cannot load config {config_path}: {'; '.join(errors)}")
 
 
 def resolve_path(p):
@@ -124,7 +122,6 @@ def wakeup_agent(wakeup_cfg, message_text, from_agent):
 
 
 def build_body(template, message_text, from_agent):
-    import copy
 
     def _sub(val):
         if isinstance(val, str):
@@ -167,11 +164,20 @@ def resolve_token(auth_cfg):
 def parse_jsonl(filepath):
     if not filepath or not filepath.exists():
         return []
+    results = []
     try:
         with open(filepath) as f:
-            return [json.loads(line) for line in f if line.strip()]
-    except (OSError, json.JSONDecodeError):
-        return []
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    results.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass  # skip malformed lines
+    except OSError:
+        pass
+    return results
 
 
 # ─── 归档 ──────────────────────────────────────────────
@@ -275,6 +281,15 @@ def run_poll(config):
         result["ok"] = True
         result["archived"] = name
         result["error"] = "" if name else "archive failed"
+        # 归档后重置所有 agent 的行号游标（新 active.jsonl 是空的）
+        if name:
+            agents = config.get("agents", {})
+            my_id = config.get("agent_id", "")
+            for aid, acfg in agents.items():
+                ctype = acfg.get("cursor", "line")
+                if ctype == "line":
+                    cf = get_cursor_file(shared_dir, aid, ctype)
+                    write_cursor(cf, ctype, 0)
         return result
 
     # ── 消息检查 ──

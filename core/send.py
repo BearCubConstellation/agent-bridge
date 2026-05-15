@@ -19,7 +19,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from lock import lock_file, unlock_file
+from lock import file_lock
 
 DEFAULT_BRIDGE_CANDIDATES = [
     Path.home() / ".agent-bridge" / "bridge.yaml",
@@ -85,12 +85,10 @@ def send(agent_id, active_file, text, quiet=False):
         "from": agent_id,
         "msg": text,
     }
-    with open(active_file, "a") as f:
-        lock_file(f)
-        try:
+    lock_path = active_file.parent / ".active.lock"
+    with file_lock(lock_path):
+        with open(active_file, "a") as f:
             f.write(json.dumps(msg, ensure_ascii=False) + "\n")
-        finally:
-            unlock_file(f)
     if not quiet:
         print(f"[{agent_id}] ✓ Message sent ({len(text)} chars)")
 

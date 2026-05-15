@@ -30,7 +30,7 @@ if [[ -z "$AGENT_ID" || -z "$CONFIG_PATH" ]]; then
   exit 1
 fi
 
-CONFIG_PATH="$(eval echo "$CONFIG_PATH")"
+CONFIG_PATH="${CONFIG_PATH/#\~/$HOME}"
 
 # ─── systemd user service ──────────────────────────────
 if command -v systemctl &>/dev/null; then
