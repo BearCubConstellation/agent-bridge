@@ -140,11 +140,12 @@ class PollManager:
         self._stop = threading.Event()
         self._lock = threading.Lock()
 
-        # 最近一次轮询结果
         self.last_result = {"ok": True, "new_msgs": 0, "delivered": False,
                             "archived": None, "error": "", "to_agent": ""}
-        self.last_run = None  # iso timestamp
+        self.last_run = None
         self.running = False
+        self.history = []  # [(timestamp, result_dict), ...]
+        self.MAX_HISTORY = 100
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -186,7 +187,10 @@ class PollManager:
 
         with self._lock:
             self.last_result = result
-            self.last_run = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.last_run = now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.history.append((now, dict(result)))
+            if len(self.history) > self.MAX_HISTORY:
+                self.history = self.history[-self.MAX_HISTORY:]
         return result
 
     def get_status(self):
@@ -197,6 +201,10 @@ class PollManager:
                 "last_run": self.last_run,
                 "last_result": dict(self.last_result),
             }
+
+    def get_history(self, limit=50):
+        with self._lock:
+            return [{"ts": ts, **r} for ts, r in self.history[-limit:]]
 
 
 # ─── HTTP Handler ─────────────────────────────────────
@@ -216,6 +224,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "/api/messages": lambda: self.handle_messages(parsed.query),
             "/api/status": self.handle_status,
             "/api/poll": self.handle_poll_status,
+            "/api/bridge/yaml": self.handle_bridge_yaml,
         }
         if path in routes:
             routes[path]()
@@ -232,6 +241,8 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "/api/poll/now": self.handle_poll_now,
             "/api/poll/start": self.handle_poll_start,
             "/api/poll/stop": self.handle_poll_stop,
+            "/api/poll/history": self.handle_poll_history,
+            "/api/send": self.handle_send_message,
         }
         handler = routes.get(parsed.path)
         if handler:
@@ -402,6 +413,61 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             return
         self.poll_manager.stop()
         self.send_json({"ok": True, "running": False})
+
+    def handle_poll_history(self):
+        if not self.poll_manager:
+            self.send_json({"ok": False, "error": "poll manager not initialized"})
+            return
+        length = int(self.headers.get("Content-Length", 0))
+        limit = 50
+        if length > 0:
+            try:
+                body = json.loads(self.rfile.read(length))
+                limit = body.get("limit", 50)
+            except Exception:
+                pass
+        history = self.poll_manager.get_history(limit)
+        self.send_json({"ok": True, "history": history})
+
+    def handle_send_message(self):
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            self.send_json({"ok": False, "error": "empty body"})
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self.send_json({"ok": False, "error": "invalid JSON"})
+            return
+
+        agent_id = body.get("agent_id", "")
+        text = body.get("text", "")
+        if not agent_id or not text:
+            self.send_json({"ok": False, "error": "agent_id and text required"})
+            return
+
+        # Import send logic inline
+        shared = Path(self.shared_dir)
+        active = shared / "active.jsonl"
+        active.parent.mkdir(parents=True, exist_ok=True)
+        msg = {
+            "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "from": agent_id,
+            "msg": text,
+        }
+        with open(active, "a") as f:
+            f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+
+        self.send_json({"ok": True, "agent_id": agent_id, "chars": len(text)})
+
+    def handle_bridge_yaml(self):
+        shared = Path(self.shared_dir)
+        config_path = shared / BRIDGE_FILENAME
+        if not config_path.exists():
+            self.send_json({"ok": False, "error": "bridge.yaml not found"})
+            return
+        text = config_path.read_text(encoding="utf-8")
+        self.send_json({"ok": True, "yaml": text})
 
     # ─── GET /api/messages ──────────────────────────
 

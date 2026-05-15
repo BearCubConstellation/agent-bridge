@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Agent Bridge · 聊天时间线</title>
+<title>Agent Bridge · 控制中心</title>
 <style>
 :root {
   --bg: #0a0a0f;
@@ -18,195 +18,313 @@
   --green: #4ecdc4;
   --red: #ff6b6b;
   --amber: #ffd93d;
-  --gradient: linear-gradient(135deg, var(--red), #e94560);
   --font: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
   --font-ui: -apple-system, 'SF Pro Text', 'Helvetica Neue', sans-serif;
-  --radius: 10px;
-  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-sm: 5px;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-ui);
-  line-height: 1.5;
-  min-height: 100vh;
+  background: var(--bg); color: var(--text);
+  font-family: var(--font-ui); line-height: 1.5;
+  min-height: 100vh; display: flex; flex-direction: column;
 }
+
+/* ═══ Header ═══ */
 .header {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: 14px 24px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 10px 20px;
   display: flex; align-items: center; justify-content: space-between;
-  flex-wrap: wrap; gap: 10px;
   position: sticky; top: 0; z-index: 100;
-  backdrop-filter: blur(8px);
 }
-.header-left { display: flex; align-items: center; gap: 14px; }
+.header-left { display: flex; align-items: center; gap: 12px; }
 .logo {
-  font-family: var(--font); font-size: 1.1em; font-weight: 700;
-  background: var(--gradient);
+  font-family: var(--font); font-size: 1em; font-weight: 700;
+  background: linear-gradient(135deg, var(--red), #e94560);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  background-clip: text; letter-spacing: -0.5px;
+  background-clip: text;
 }
-.header-sub { color: var(--text3); font-size: 0.8em; font-family: var(--font); }
-.header-right { display: flex; align-items: center; gap: 8px; }
+.header-sub { color: var(--text3); font-size: 0.78em; font-family: var(--font); }
+.header-right { display: flex; gap: 6px; }
 
 .agent-badge {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 0.82em; padding: 5px 12px;
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 0.78em; padding: 3px 10px;
   background: var(--surface2); border-radius: 20px;
   border: 1px solid var(--border); cursor: pointer;
   transition: all 0.2s; position: relative;
 }
 .agent-badge:hover { border-color: var(--text3); background: var(--surface3); }
 .agent-badge.editing { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.agent-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.badge-edit-icon { font-size: 0.7em; opacity: 0.4; margin-left: 2px; }
-.agent-badge:hover .badge-edit-icon { opacity: 0.8; }
+.agent-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 
+/* ═══ Edit popup (same as before) ═══ */
 .edit-popup {
-  position: absolute; top: calc(100% + 8px); right: 0;
+  position: absolute; top: calc(100% + 6px); right: 0;
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 14px 16px; min-width: 220px;
+  border-radius: var(--radius); padding: 12px 14px; min-width: 200px;
   z-index: 200; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none;
 }
 .edit-popup.open { display: block; }
-.edit-field { margin-bottom: 10px; }
+.edit-field { margin-bottom: 8px; }
 .edit-field label {
-  display: block; font-size: 0.72em; color: var(--text3);
-  margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.5px;
+  display: block; font-size: 0.7em; color: var(--text3);
+  margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;
 }
-.edit-field input, .edit-field select {
-  width: 100%; background: var(--surface2);
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  color: var(--text); padding: 7px 10px; font-size: 0.85em;
-  font-family: var(--font-ui); outline: none; transition: border-color 0.2s;
+.edit-field input {
+  width: 100%; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text); padding: 6px 9px;
+  font-size: 0.82em; font-family: var(--font-ui); outline: none;
+  transition: border-color 0.2s;
 }
 .edit-field input:focus { border-color: var(--accent); }
 .edit-field .field-error { border-color: var(--red); }
-.edit-error-msg { font-size: 0.72em; color: var(--red); margin-top: 2px; min-height: 1em; }
+.edit-error-msg { font-size: 0.7em; color: var(--red); margin-top: 1px; min-height: 1em; }
 .edit-rename-warn {
   background: rgba(255,217,61,0.1); border: 1px solid rgba(255,217,61,0.3);
-  border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 10px;
-  font-size: 0.75em; color: var(--amber); line-height: 1.5;
+  border-radius: var(--radius-sm); padding: 6px 8px; margin-bottom: 8px;
+  font-size: 0.72em; color: var(--amber); line-height: 1.5;
 }
-.edit-popup-actions { display: flex; gap: 6px; margin-top: 10px; }
+.edit-popup-actions { display: flex; gap: 5px; margin-top: 8px; }
 .edit-btn {
-  flex: 1; padding: 6px 10px; border-radius: var(--radius-sm);
+  flex: 1; padding: 5px 8px; border-radius: var(--radius-sm);
   border: 1px solid var(--border); background: var(--surface2);
-  color: var(--text2); font-size: 0.8em; cursor: pointer;
+  color: var(--text2); font-size: 0.78em; cursor: pointer;
   transition: all 0.15s; font-family: var(--font-ui);
 }
 .edit-btn:hover { background: var(--surface3); color: var(--text); }
 .edit-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.edit-btn.primary:hover { opacity: 0.9; }
-.edit-btn.danger { background: var(--red); border-color: var(--red); color: #fff; }
-.edit-status { font-size: 0.75em; margin-top: 6px; min-height: 1.2em; }
+.edit-status { font-size: 0.72em; margin-top: 5px; min-height: 1.1em; }
 .edit-status.ok { color: var(--green); }
 .edit-status.error { color: var(--red); }
 
-.controls {
-  background: var(--surface); padding: 12px 24px;
-  display: flex; align-items: center; gap: 12px;
-  flex-wrap: wrap; border-bottom: 1px solid var(--border);
+/* ═══ Agent cards ═══ */
+.cards-bar {
+  background: var(--surface);
+  padding: 10px 20px;
+  display: flex; gap: 10px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
 }
-.controls input, .controls select {
+.agent-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  min-width: 180px;
+  flex-shrink: 0;
+}
+.agent-card-header {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px;
+}
+.agent-card-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+}
+.agent-card-name {
+  font-weight: 600; font-size: 0.88em;
+}
+.agent-card-row {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.75em; color: var(--text3); padding: 2px 0;
+}
+.agent-card-row .label { color: var(--text3); min-width: 50px; }
+.agent-card-row .val { color: var(--text2); font-family: var(--font); font-size: 0.95em; }
+.agent-card-row .val.ok { color: var(--green); }
+.agent-card-row .val.warn { color: var(--amber); }
+
+/* ═══ Tabs ═══ */
+.tab-bar {
+  background: var(--surface);
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+}
+.tab-btn {
+  background: none; border: none;
+  color: var(--text3); padding: 10px 18px;
+  font-size: 0.82em; font-family: var(--font-ui);
+  cursor: pointer; border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+.tab-btn:hover { color: var(--text2); }
+.tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
+
+/* ═══ Compose bar ═══ */
+.compose-bar {
+  padding: 8px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+.compose-bar select {
   background: var(--surface2); border: 1px solid var(--border);
   border-radius: var(--radius-sm); color: var(--text);
-  padding: 8px 12px; font-size: 0.85em; font-family: var(--font-ui);
-  outline: none; transition: border-color 0.2s;
+  padding: 7px 10px; font-size: 0.82em; font-family: var(--font-ui);
+  outline: none; min-width: 90px;
 }
-.controls input:focus, .controls select:focus { border-color: var(--accent); }
-.controls input::placeholder { color: var(--text3); }
-.search-box { flex: 1; min-width: 180px; max-width: 320px; }
-.archive-select { min-width: 160px; }
-.refresh-btn {
-  background: var(--surface2); border: 1px solid var(--border);
-  color: var(--text2); padding: 8px 14px;
-  border-radius: var(--radius-sm); cursor: pointer;
-  font-size: 0.85em; transition: all 0.2s; font-family: var(--font-ui);
+.compose-bar input {
+  flex: 1; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text);
+  padding: 7px 12px; font-size: 0.85em; font-family: var(--font-ui);
+  outline: none; max-width: 500px;
 }
-.refresh-btn:hover { background: var(--surface3); color: var(--text); }
-.refresh-btn:active { transform: scale(0.96); }
-.auto-refresh-label {
-  color: var(--text3); font-size: 0.8em;
-  display: flex; align-items: center; gap: 6px; cursor: pointer;
+.compose-bar input:focus { border-color: var(--accent); }
+.compose-btn {
+  background: var(--accent); border: none; color: #fff;
+  padding: 7px 16px; border-radius: var(--radius-sm);
+  font-size: 0.82em; cursor: pointer; font-family: var(--font-ui);
+  transition: opacity 0.15s;
 }
-.auto-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); transition: opacity 0.3s; }
-.auto-dot.paused { background: var(--text3); opacity: 0.5; }
+.compose-btn:hover { opacity: 0.9; }
+.compose-btn:disabled { opacity: 0.4; cursor: default; }
 
-.chat-area { max-width: 860px; margin: 0 auto; padding: 20px 24px 60px; }
-.empty-state { text-align: center; padding: 80px 20px; color: var(--text3); }
-.empty-state .icon { font-size: 3em; margin-bottom: 12px; opacity: 0.4; }
-.empty-state h3 { color: var(--text2); font-weight: 500; margin-bottom: 8px; font-size: 1.1em; }
-.empty-state p { font-size: 0.88em; max-width: 400px; margin: 0 auto; line-height: 1.7; }
+/* ═══ Main content ═══ */
+.main-content {
+  flex: 1;
+  overflow-y: auto;
+}
+.tab-pane { display: none; padding: 16px 20px; }
+.tab-pane.active { display: block; }
 
-.date-separator { text-align: center; margin: 24px 0 16px; position: relative; }
+/* ═══ Chat pane ═══ */
+.chat-area { max-width: 860px; margin: 0 auto; }
+.empty-state { text-align: center; padding: 60px 20px; color: var(--text3); }
+.empty-state .icon { font-size: 2.5em; margin-bottom: 10px; opacity: 0.4; }
+.empty-state h3 { color: var(--text2); font-weight: 500; margin-bottom: 6px; font-size: 1em; }
+.empty-state p { font-size: 0.85em; color: var(--text3); }
+
+.date-separator { text-align: center; margin: 20px 0 12px; position: relative; }
 .date-separator::before {
   content: ''; position: absolute; left: 0; right: 0; top: 50%;
   height: 1px; background: var(--border);
 }
 .date-separator span {
-  background: var(--bg); color: var(--text3); font-size: 0.78em;
-  font-family: var(--font); padding: 0 12px; position: relative; letter-spacing: 0.5px;
+  background: var(--bg); color: var(--text3); font-size: 0.75em;
+  font-family: var(--font); padding: 0 10px; position: relative;
 }
 
-.message-group { display: flex; gap: 10px; margin-bottom: 16px; animation: fadeIn 0.3s ease; }
+.message-group { display: flex; gap: 8px; margin-bottom: 12px; animation: fadeIn 0.2s ease; }
 .message-group.left { flex-direction: row; }
 .message-group.right { flex-direction: row-reverse; }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
 .msg-avatar {
-  flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%;
+  flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  font-size: 0.85em; font-weight: 700; font-family: var(--font);
+  font-size: 0.78em; font-weight: 700; font-family: var(--font);
   margin-top: 2px; user-select: none; border-width: 1px; border-style: solid;
 }
 .msg-bubble {
-  max-width: 75%; background: var(--surface); border: 1px solid var(--border);
-  border-radius: 12px; padding: 12px 16px; position: relative;
+  max-width: 72%; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 14px;
 }
-.msg-bubble.left { border-top-left-radius: 4px; }
-.msg-bubble.right { border-top-right-radius: 4px; }
-.msg-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.msg-sender { font-size: 0.82em; font-weight: 600; }
-.msg-time { font-size: 0.72em; color: var(--text3); font-family: var(--font); }
-.msg-source { font-size: 0.7em; color: var(--text3); margin-left: auto; opacity: 0.6; }
-.msg-text { font-size: 0.92em; line-height: 1.65; color: var(--text); word-break: break-word; white-space: pre-wrap; }
+.msg-bubble.left { border-top-left-radius: 3px; }
+.msg-bubble.right { border-top-right-radius: 3px; }
+.msg-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.msg-sender { font-size: 0.8em; font-weight: 600; }
+.msg-time { font-size: 0.7em; color: var(--text3); font-family: var(--font); }
+.msg-source { font-size: 0.68em; color: var(--text3); margin-left: auto; opacity: 0.5; }
+.msg-text { font-size: 0.88em; line-height: 1.6; color: var(--text); word-break: break-word; white-space: pre-wrap; }
 
-.footer-stats {
-  position: fixed; bottom: 0; left: 0; right: 0;
-  background: var(--surface); border-top: 1px solid var(--border);
-  padding: 8px 24px; display: flex; align-items: center;
-  justify-content: space-between; font-size: 0.76em;
-  color: var(--text3); font-family: var(--font); backdrop-filter: blur(8px); z-index: 100;
+/* ═══ Controls bar (search + archive) ═══ */
+.chat-controls {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
 }
-.stat-item { display: flex; align-items: center; gap: 5px; }
-.stat-value { color: var(--text2); }
-.stat-sep { opacity: 0.3; }
+.chat-controls input, .chat-controls select {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text);
+  padding: 6px 10px; font-size: 0.8em; font-family: var(--font-ui);
+  outline: none; transition: border-color 0.2s;
+}
+.chat-controls input:focus, .chat-controls select:focus { border-color: var(--accent); }
+.chat-search { flex: 1; min-width: 150px; max-width: 280px; }
+.chat-archive { min-width: 140px; }
+.tool-btn {
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text2); padding: 6px 10px;
+  border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 0.78em; transition: all 0.15s; font-family: var(--font-ui);
+}
+.tool-btn:hover { background: var(--surface3); color: var(--text); }
+
+/* ═══ Activity pane ═══ */
+.activity-timeline { max-width: 700px; margin: 0 auto; }
+.activity-item {
+  display: flex; gap: 12px; padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.activity-time {
+  font-family: var(--font); font-size: 0.72em;
+  color: var(--text3); min-width: 60px; flex-shrink: 0;
+  padding-top: 2px;
+}
+.activity-icon { flex-shrink: 0; font-size: 0.9em; width: 20px; text-align: center; }
+.activity-body { flex: 1; }
+.activity-title {
+  font-size: 0.82em; color: var(--text2);
+}
+.activity-detail {
+  font-size: 0.75em; color: var(--text3); margin-top: 2px;
+  font-family: var(--font);
+}
+.activity-detail.error { color: var(--red); }
+.activity-empty {
+  text-align: center; padding: 60px 20px; color: var(--text3);
+}
+
+/* ═══ Settings pane ═══ */
+.settings-area { max-width: 700px; margin: 0 auto; }
+.settings-area h3 {
+  font-size: 0.85em; color: var(--text2);
+  margin-bottom: 10px; font-weight: 500;
+}
+.yaml-editor {
+  width: 100%; min-height: 300px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text);
+  font-family: var(--font); font-size: 0.78em; line-height: 1.6;
+  padding: 14px; resize: vertical; outline: none;
+  white-space: pre; overflow-x: auto;
+}
+.yaml-editor:focus { border-color: var(--accent); }
+.settings-actions { margin-top: 10px; display: flex; gap: 8px; }
+
+/* ═══ Footer ═══ */
+.footer {
+  background: var(--surface); border-top: 1px solid var(--border);
+  padding: 7px 20px;
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 0.74em; color: var(--text3); font-family: var(--font);
+}
+.footer-left { display: flex; align-items: center; gap: 10px; }
+.footer-right { display: flex; align-items: center; gap: 8px; }
+.footer-stat { color: var(--text2); }
 .poll-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
 .poll-dot.active { background: var(--green); }
 .poll-dot.stopped { background: var(--text3); }
-.poll-btn {
+.poll-toggle {
   background: none; border: 1px solid var(--border); color: var(--text3);
-  padding: 2px 8px; border-radius: 4px; cursor: pointer;
-  font-size: 0.85em; font-family: var(--font); transition: all 0.15s;
+  padding: 1px 7px; border-radius: 3px; cursor: pointer;
+  font-size: 0.9em; font-family: var(--font); transition: all 0.12s;
 }
-.poll-btn:hover { background: var(--surface2); color: var(--text2); }
+.poll-toggle:hover { background: var(--surface2); color: var(--text2); }
 
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--surface3); }
 
 @media (max-width: 600px) {
-  .header { padding: 12px 16px; }
-  .controls { padding: 10px 16px; }
-  .chat-area { padding: 12px 12px 70px; }
-  .msg-bubble { max-width: 88%; }
-  .msg-avatar { width: 30px; height: 30px; font-size: 0.75em; }
-  .header-sub { display: none; }
-  .archive-select { min-width: 120px; }
+  .header { padding: 8px 12px; }
+  .cards-bar { padding: 8px 12px; }
+  .tab-bar { padding: 0 12px; }
+  .tab-btn { padding: 8px 12px; font-size: 0.78em; }
+  .compose-bar { padding: 6px 12px; flex-wrap: wrap; }
+  .compose-bar input { max-width: 100%; }
+  .main-content { padding: 0; }
+  .tab-pane { padding: 12px; }
+  .msg-bubble { max-width: 85%; }
+  .agent-card { min-width: 140px; }
 }
 </style>
 </head>
@@ -214,77 +332,95 @@ body {
 
 <header class="header">
   <div class="header-left">
-    <div class="logo">agent-bridge</div>
-    <span class="header-sub">聊天时间线</span>
+    <span class="logo">agent-bridge</span>
+    <span class="header-sub">控制中心</span>
   </div>
   <div class="header-right" id="agentBadgeContainer"></div>
 </header>
 
-<div class="controls">
-  <input class="search-box" id="searchInput" type="text" placeholder="搜索消息…" />
-  <select class="archive-select" id="archiveSelect">
-    <option value="__active__">📄 当前对话</option>
-  </select>
-  <button class="refresh-btn" id="refreshBtn" title="手动刷新">⟳</button>
-  <label class="auto-refresh-label">
-    <span class="auto-dot" id="autoDot"></span>
-    <span id="autoLabel">实时</span>
-  </label>
-  <button class="refresh-btn" id="archiveBtn" title="归档当前对话" style="margin-left:auto;">📦</button>
+<div class="cards-bar" id="cardsBar"></div>
+
+<div class="tab-bar">
+  <button class="tab-btn active" data-tab="chat">💬 聊天</button>
+  <button class="tab-btn" data-tab="activity">📡 活动</button>
+  <button class="tab-btn" data-tab="settings">⚙ 设置</button>
 </div>
 
-<div class="chat-area" id="chatArea">
-  <div class="empty-state">
-    <div class="icon">💬</div>
-    <h3>等待消息…</h3>
-    <p>未检测到对话文件。确认 agent-bridge 已正确配置且双方已开始通信。</p>
+<div class="compose-bar">
+  <select id="composeAgent"></select>
+  <input type="text" id="composeInput" placeholder="输入消息，按 Enter 发送…" />
+  <button class="compose-btn" id="composeBtn">发送→</button>
+</div>
+
+<div class="main-content">
+
+  <!-- ═══ Chat pane ═══ -->
+  <div class="tab-pane active" id="pane-chat">
+    <div class="chat-area">
+      <div class="chat-controls">
+        <input class="chat-search" id="searchInput" type="text" placeholder="搜索消息…" />
+        <select class="chat-archive" id="archiveSelect">
+          <option value="__active__">📄 当前对话</option>
+        </select>
+        <button class="tool-btn" id="archiveBtn" title="归档">📦</button>
+        <button class="tool-btn" id="refreshBtn" title="刷新">⟳</button>
+      </div>
+      <div id="chatArea">
+        <div class="empty-state">
+          <div class="icon">💬</div>
+          <h3>暂无消息</h3>
+          <p>等 agent 双方开始通信后，消息将在这里显示。</p>
+        </div>
+      </div>
+    </div>
   </div>
+
+  <!-- ═══ Activity pane ═══ -->
+  <div class="tab-pane" id="pane-activity">
+    <div class="activity-timeline" id="activityArea">
+      <div class="activity-empty">
+        <div class="icon" style="font-size:2.5em;opacity:0.4">📡</div>
+        <h3 style="color:var(--text2);font-weight:500;margin-top:8px;font-size:1em">暂无活动记录</h3>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Settings pane ═══ -->
+  <div class="tab-pane" id="pane-settings">
+    <div class="settings-area">
+      <h3>bridge.yaml</h3>
+      <textarea class="yaml-editor" id="yamlEditor" spellcheck="false" readonly></textarea>
+    </div>
+  </div>
+
 </div>
 
-<div class="footer-stats">
-  <div class="stat-item">
+<footer class="footer">
+  <div class="footer-left">
     <span>消息</span>
-    <span class="stat-value" id="statCount">—</span>
+    <span class="footer-stat" id="statCount">—</span>
+    <span class="footer-stat" id="statLast"></span>
   </div>
-  <div class="stat-item">
-    <span class="stat-sep">·</span>
-    <span>最后</span>
-    <span class="stat-value" id="statLast">—</span>
-  </div>
-  <div class="stat-item">
-    <span class="stat-sep">·</span>
-    <span>文件</span>
-    <span class="stat-value" id="statFile">—</span>
-  </div>
-  <div class="stat-item" style="margin-left:auto;">
+  <div class="footer-right">
     <span class="poll-dot" id="pollDot"></span>
     <span id="pollLabel">轮询</span>
-    <button class="poll-btn" id="pollBtn" title="手动触发轮询">▶</button>
+    <button class="poll-toggle" id="pollBtn">∥</button>
   </div>
-</div>
+</footer>
 
 <script>
 // ============================================================
-//  Agent Bridge · Chat Timeline
+//  Agent Bridge · Control Center
 // ============================================================
 
 const VALID_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
 let state = {
-  messages: [],
-  agents: [],
-  agentIds: [],
-  // agentMap: current ID → {display_name, color}
-  // agentAlias: any from value seen in messages → {display_name, color}
-  //   (so old messages still resolve after rename)
-  agentMap: {},
-  agentAlias: {},
-  archive: '__active__',
-  searchQuery: '',
-  autoRefresh: true,
-  pollInterval: null,
-  editingBadge: null,
-  popupCloseHandler: null,
+  messages: [], agents: [], agentIds: [], agentMap: {}, agentAlias: {},
+  archive: '__active__', searchQuery: '',
+  autoRefresh: true, pollInterval: null, pollStatusTimer: null,
+  editingBadge: null, popupCloseHandler: null,
+  activeTab: 'chat',
 };
 
 const $ = s => document.querySelector(s);
@@ -293,32 +429,27 @@ const searchInput = $('#searchInput');
 const archiveSelect = $('#archiveSelect');
 const refreshBtn = $('#refreshBtn');
 const archiveBtn = $('#archiveBtn');
-const autoDot = $('#autoDot');
-const autoLabel = $('#autoLabel');
+const cardsBar = $('#cardsBar');
 const badgeContainer = $('#agentBadgeContainer');
+const composeAgent = $('#composeAgent');
+const composeInput = $('#composeInput');
+const composeBtn = $('#composeBtn');
 const statCount = $('#statCount');
 const statLast = $('#statLast');
-const statFile = $('#statFile');
 const pollDot = $('#pollDot');
 const pollLabel = $('#pollLabel');
 const pollBtn = $('#pollBtn');
+const activityArea = $('#activityArea');
+const yamlEditor = $('#yamlEditor');
 
 // ═══ API ═══
-async function apiGet(path) {
-  try { const r = await fetch(path); return await r.json(); } catch (e) { return null; }
-}
-async function apiPost(path, data) {
-  try {
-    const r = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    return await r.json();
-  } catch (e) { return null; }
+async function apiGet(p) { try { const r = await fetch(p); return await r.json(); } catch(e) { return null; } }
+async function apiPost(p, d) {
+  try { const r = await fetch(p, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(d)}); return await r.json(); }
+  catch(e) { return null; }
 }
 
-// ═══ Load functions ═══
+// ═══ Config ═══
 async function loadConfig() {
   const data = await apiGet('/api/config');
   if (!data || !data.ok) return;
@@ -326,73 +457,240 @@ async function loadConfig() {
   state.agents = agents;
   state.agentIds = agents.map(a => a.id);
   const newMap = {};
-  for (const a of agents) {
-    newMap[a.id] = {
-      display_name: a.display_name || a.id,
-      color: a.color || '#8888a0',
-    };
-  }
-  // Preserve aliases: old IDs that appeared in messages still map to a known agent
-  // Only keep aliases whose target still exists
+  for (const a of agents) newMap[a.id] = {display_name: a.display_name || a.id, color: a.color || '#8888a0'};
   const oldAliases = state.agentAlias || {};
   state.agentAlias = {};
   for (const [oldId, info] of Object.entries(oldAliases)) {
-    // If the old alias points to a current agent, keep it
-    const current = newMap[info.id] || newMap[oldId];
-    if (current) {
-      state.agentAlias[oldId] = { ...current, id: info.id || oldId };
-    }
+    const cur = newMap[info.id] || newMap[oldId];
+    if (cur) state.agentAlias[oldId] = {...cur, id: info.id || oldId};
   }
   state.agentMap = newMap;
   renderBadges();
+  renderCards();
+  renderComposeSelect();
 }
 
-async function buildAliasesFromMessages() {
-  // Scan all messages and map unknown from values to known agents
-  for (const msg of state.messages) {
-    const sender = msg.from;
-    if (!sender) continue;
-    if (state.agentMap[sender]) continue; // already known
-    if (state.agentAlias[sender]) continue; // already aliased
-
-    // Find the closest known agent by ID similarity
-    let bestMatch = null;
-    let bestScore = 0;
-    for (const [knownId, info] of Object.entries(state.agentMap)) {
-      // If sender starts with the known ID or vice versa
-      if (sender.startsWith(knownId) || knownId.startsWith(sender)) {
-        const score = Math.min(sender.length, knownId.length);
-        if (score > bestScore) {
-          bestScore = score;
-          bestMatch = knownId;
-        }
-      }
-    }
-    if (bestMatch) {
-      state.agentAlias[sender] = { ...state.agentMap[bestMatch], id: bestMatch };
-    } else {
-      state.agentAlias[sender] = {
-        display_name: sender,
-        color: '#8888a0',
-        id: sender,
-      };
-    }
+// ═══ Badges (header) ═══
+function renderBadges() {
+  badgeContainer.innerHTML = '';
+  for (const a of state.agents) {
+    const el = document.createElement('div');
+    el.className = 'agent-badge'; el.dataset.agentId = a.id;
+    el.innerHTML = `<span class="agent-dot" style="background:${a.color}"></span><span>${esc(a.display_name||a.id)}</span>`;
+    el.addEventListener('click', e => { e.stopPropagation(); openEditPopup(el, a); });
+    badgeContainer.appendChild(el);
   }
 }
 
-async function loadMessages() {
-  const params = new URLSearchParams();
-  if (state.archive !== '__active__') params.set('archive', state.archive);
-  if (state.searchQuery) params.set('q', state.searchQuery);
-  params.set('limit', '500');
+// ═══ Agent cards (dashboard) ═══
+async function renderCards() {
+  cardsBar.innerHTML = '';
+  // Fetch poll status for wakeup indicators
+  const pollData = await apiGet('/api/poll');
+  for (const a of state.agents) {
+    const cfg = await apiGet('/api/config');
+    const fullCfg = cfg && cfg.agents ? cfg.agents.find(x => x.id === a.id) : null;
+    const card = document.createElement('div');
+    card.className = 'agent-card';
+    card.innerHTML = `
+      <div class="agent-card-header">
+        <span class="agent-card-dot" style="background:${a.color}"></span>
+        <span class="agent-card-name" style="color:${a.color}">${esc(a.display_name || a.id)}</span>
+      </div>
+      <div class="agent-card-row"><span class="label">ID</span><span class="val">${esc(a.id)}</span></div>
+      <div class="agent-card-row"><span class="label">来自</span><span class="val">${esc(fullCfg?.filter_from || '—')}</span></div>
+      <div class="agent-card-row"><span class="label">游标</span><span class="val">${esc(fullCfg?.cursor || 'line')}</span></div>
+      <div class="agent-card-row">
+        <span class="label">唤醒</span>
+        <span class="val ${fullCfg?.wakeup?.url ? 'ok' : 'warn'}">${fullCfg?.wakeup?.url ? '✓ 已配置' : '✗ 未配置'}</span>
+      </div>`;
+    cardsBar.appendChild(card);
+  }
+}
 
-  const data = await apiGet(`/api/messages?${params}`);
+// ═══ Compose select ═══
+function renderComposeSelect() {
+  composeAgent.innerHTML = '';
+  for (const a of state.agents) {
+    const opt = document.createElement('option');
+    opt.value = a.id;
+    opt.textContent = a.display_name || a.id;
+    composeAgent.appendChild(opt);
+  }
+}
+
+composeInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
+composeBtn.addEventListener('click', sendMessage);
+
+async function sendMessage() {
+  const aid = composeAgent.value;
+  const text = composeInput.value.trim();
+  if (!text) return;
+  composeBtn.disabled = true;
+  const result = await apiPost('/api/send', {agent_id: aid, text});
+  composeBtn.disabled = false;
+  if (result && result.ok) {
+    composeInput.value = '';
+    if (state.activeTab === 'chat') loadMessages();
+  }
+}
+
+// ═══ Edit popup ═══
+function openEditPopup(el, agent) {
+  closeEditPopup();
+  state.editingBadge = agent.id;
+  el.classList.add('editing');
+  const popup = document.createElement('div');
+  popup.className = 'edit-popup open';
+  popup.dataset.agentId = agent.id;
+  popup.innerHTML = `
+    <div class="edit-field">
+      <label>Agent ID</label>
+      <input type="text" class="edit-id-input" value="${esc(agent.id)}" placeholder="e.g. momo">
+      <div class="edit-error-msg"></div>
+    </div>
+    <div class="edit-field">
+      <label>名称</label>
+      <input type="text" class="edit-name-input" value="${esc(agent.display_name||agent.id)}" placeholder="Display name">
+    </div>
+    <div class="edit-field">
+      <label>颜色</label>
+      <input type="text" class="edit-color-input" value="${agent.color}" placeholder="#rrggbb" style="font-family:var(--font);font-size:0.8em">
+    </div>
+    <div class="edit-rename-warn" style="display:none">⚠️ 修改 ID 后需同步更新对方配置中的 filter_from</div>
+    <div class="edit-popup-actions">
+      <button class="edit-btn cancel-btn">取消</button>
+      <button class="edit-btn primary save-btn">保存</button>
+    </div>
+    <div class="edit-status"></div>`;
+  el.appendChild(popup);
+  const idI = popup.querySelector('.edit-id-input');
+  idI.focus(); idI.setSelectionRange(idI.value.length, idI.value.length);
+  idI.addEventListener('input', () => {
+    popup.querySelector('.edit-rename-warn').style.display = (idI.value.trim() !== agent.id) ? 'block' : 'none';
+    validateId(idI);
+  });
+  popup.querySelector('.save-btn').addEventListener('click', () => saveAgent(agent, popup));
+  popup.querySelector('.cancel-btn').addEventListener('click', closeEditPopup);
+  popup.querySelectorAll('input').forEach(inp => {
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') saveAgent(agent, popup); if (e.key === 'Escape') closeEditPopup(); });
+  });
+  setTimeout(() => {
+    if (state.popupCloseHandler) document.removeEventListener('click', state.popupCloseHandler);
+    state.popupCloseHandler = e => { if (!e.target.closest('.edit-popup') && !e.target.closest('.agent-badge.editing')) closeEditPopup(); };
+    document.addEventListener('click', state.popupCloseHandler);
+  }, 10);
+}
+
+function validateId(i) {
+  const err = i.parentElement.querySelector('.edit-error-msg');
+  const v = i.value.trim();
+  if (!v) { err.textContent = '不能为空'; i.classList.add('field-error'); return false; }
+  if (!VALID_ID_RE.test(v)) { err.textContent = '字母、数字、-、_ 仅'; i.classList.add('field-error'); return false; }
+  err.textContent = ''; i.classList.remove('field-error'); return true;
+}
+
+function closeEditPopup() {
+  if (state.popupCloseHandler) { document.removeEventListener('click', state.popupCloseHandler); state.popupCloseHandler = null; }
+  document.querySelectorAll('.edit-popup').forEach(e => e.remove());
+  document.querySelectorAll('.agent-badge.editing').forEach(e => e.classList.remove('editing'));
+  state.editingBadge = null;
+}
+
+async function saveAgent(agent, popup) {
+  const st = popup.querySelector('.edit-status');
+  const idI = popup.querySelector('.edit-id-input');
+  const nameI = popup.querySelector('.edit-name-input');
+  const colI = popup.querySelector('.edit-color-input');
+  const newId = idI.value.trim();
+  const newName = nameI.value.trim();
+  const newColor = colI.value.trim();
+  if (!validateId(idI)) return;
+  if (!/^#[0-9a-fA-F]{6}$/.test(newColor)) { st.textContent = '颜色格式 #rrggbb'; st.className='edit-status error'; return; }
+  st.textContent = '保存…'; st.className = 'edit-status';
+  const payload = state.agents.map(a => {
+    if (a.id === agent.id) return {id: newId, old_id: (newId!==agent.id)?agent.id:undefined, display_name: newName||newId, color: newColor};
+    return {id: a.id, display_name: a.display_name, color: a.color};
+  });
+  const r = await apiPost('/api/config', {agents: payload});
+  if (r && r.ok) {
+    st.textContent = '✓ 已保存'; st.className = 'edit-status ok';
+    await loadConfig(); await loadMessages(); await renderCards();
+    setTimeout(closeEditPopup, 700);
+  } else { st.textContent = '失败: '+(r?.error||'unknown'); st.className='edit-status error'; }
+}
+
+// ═══ Messages ═══
+function resolveAgent(sender) { return state.agentMap[sender] || state.agentAlias[sender] || {display_name:sender,color:'#8888a0'}; }
+
+async function loadMessages() {
+  const p = new URLSearchParams();
+  if (state.archive !== '__active__') p.set('archive', state.archive);
+  if (state.searchQuery) p.set('q', state.searchQuery);
+  p.set('limit','500');
+  const data = await apiGet(`/api/messages?${p}`);
   if (!data || !data.ok) return;
   state.messages = data.messages || [];
-  await buildAliasesFromMessages();
-  renderMessages();
-  updateStats();
+  // Build aliases
+  for (const m of state.messages) {
+    const s = m.from; if (!s || state.agentMap[s] || state.agentAlias[s]) continue;
+    let best = null, bestScore = 0;
+    for (const [kid] of Object.entries(state.agentMap)) {
+      if (s.startsWith(kid) || kid.startsWith(s)) { const sc = Math.min(s.length, kid.length); if (sc > bestScore) { bestScore = sc; best = kid; } }
+    }
+    state.agentAlias[s] = best ? {...state.agentMap[best], id: best} : {display_name: s, color: '#8888a0', id: s};
+  }
+  renderMessages(); updateStats();
 }
+
+function renderMessages() {
+  const msgs = state.messages;
+  if (!msgs.length) {
+    chatArea.innerHTML = '<div class="empty-state"><div class="icon">💬</div><h3>暂无消息</h3><p>等 agent 双方开始通信后，消息将在这里显示。</p></div>';
+    return;
+  }
+  let html = '', lastDate = '';
+  for (const m of msgs) {
+    const sender = m.from || 'unknown', ts = m.ts || '', date = ts.slice(0,10), time = ts.slice(11,19);
+    const text = m.msg || '', source = m._source === 'active' ? '' : `📦 ${m._source}`;
+    if (date !== lastDate) { html += `<div class="date-separator"><span>${date}</span></div>`; lastDate = date; }
+    const idx = state.agentIds.indexOf(sender);
+    const side = (idx >=0 && state.agentIds.length>=2) ? (idx%2===0?'left':'right') : 'left';
+    const info = resolveAgent(sender), color = info.color;
+    html += `<div class="message-group ${side}">
+      <div class="msg-avatar ${side}" style="background:${color}22;color:${color};border-color:${color}44">${esc(sender[0].toUpperCase())}</div>
+      <div class="msg-bubble ${side}">
+        <div class="msg-header">
+          <span class="msg-sender" style="color:${color}">${esc(info.display_name)}</span>
+          <span class="msg-time">${time}</span>
+          ${source?`<span class="msg-source">${source}</span>`:''}
+        </div>
+        <div class="msg-text">${esc(text)}</div>
+      </div></div>`;
+  }
+  chatArea.innerHTML = html;
+}
+
+function updateStats() {
+  const ms = state.messages;
+  statCount.textContent = ms.length;
+  statLast.textContent = ms.length ? '· 最后 ' + (ms[ms.length-1].ts||'').slice(11,19) : '';
+}
+
+// ═══ Search / Archive / Refresh ═══
+let searchTimeout;
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => { state.searchQuery = searchInput.value.trim(); loadMessages(); }, 300);
+});
+archiveSelect.addEventListener('change', () => { state.archive = archiveSelect.value; loadMessages(); });
+refreshBtn.addEventListener('click', refreshAll);
+
+archiveBtn.addEventListener('click', async () => {
+  if (!confirm('归档当前对话？')) return;
+  const r = await apiPost('/api/archive', {});
+  if (r && r.ok) { await loadArchives(); await refreshAll(); }
+});
 
 async function loadArchives() {
   const data = await apiGet('/api/status');
@@ -401,363 +699,97 @@ async function loadArchives() {
   if (data.history) {
     for (const h of data.history) {
       const opt = document.createElement('option');
-      opt.value = h.name;
-      const datePart = h.name.replace('.jsonl', '');
-      opt.textContent = `📦 ${datePart} (${h.count} 条)`;
+      opt.value = h.name; opt.textContent = `📦 ${h.name.replace('.jsonl','')} (${h.count} 条)`;
       archiveSelect.appendChild(opt);
     }
   }
 }
 
-async function loadStatus() {
-  const data = await apiGet('/api/status');
-  if (!data || !data.ok) return;
-  statCount.textContent = data.active.count;
-  const hc = data.history_count || 0;
-  statFile.textContent = hc > 0 ? `active + ${hc} archive` : 'active only';
-}
-
-// ═══ Agent badges (clickable to edit) ═══
-function renderBadges() {
-  badgeContainer.innerHTML = '';
-  for (const agent of state.agents) {
-    const badge = document.createElement('div');
-    badge.className = 'agent-badge';
-    badge.dataset.agentId = agent.id;
-    badge.innerHTML = `
-      <span class="agent-dot" style="background:${agent.color}"></span>
-      <span class="badge-name">${esc(agent.display_name || agent.id)}</span>
-      <span class="badge-edit-icon">✎</span>
-    `;
-    badge.addEventListener('click', e => {
-      e.stopPropagation();
-      openEditPopup(badge, agent);
-    });
-    badgeContainer.appendChild(badge);
-  }
-}
-
-function openEditPopup(badgeEl, agent) {
-  closeEditPopup();
-  state.editingBadge = agent.id;
-  badgeEl.classList.add('editing');
-
-  const popup = document.createElement('div');
-  popup.className = 'edit-popup open';
-  popup.dataset.agentId = agent.id;
-
-  const idInputId = `edit-id-${agent.id}`;
-  const nameInputId = `edit-name-${agent.id}`;
-  const colorInputId = `edit-color-${agent.id}`;
-
-  popup.innerHTML = `
-    <div class="edit-field">
-      <label>Agent ID</label>
-      <input type="text" id="${idInputId}" class="edit-id-input"
-             value="${esc(agent.id)}" placeholder="e.g. momo, alice">
-      <div class="edit-error-msg" id="error-${idInputId}"></div>
-    </div>
-    <div class="edit-field">
-      <label>显示名称</label>
-      <input type="text" id="${nameInputId}" class="edit-name-input"
-             value="${esc(agent.display_name || agent.id)}" placeholder="Display name">
-    </div>
-    <div class="edit-field">
-      <label>颜色</label>
-      <input type="text" id="${colorInputId}" class="edit-color-input"
-             value="${agent.color}" placeholder="#rrggbb"
-             style="font-family:var(--font);font-size:0.82em">
-    </div>
-    <div class="edit-rename-warn" id="renameWarn" style="display:none">
-      ⚠️ 修改 Agent ID 后，需要<strong>同时更新对方配置</strong>中的
-      <code>filter_from</code>，否则对方收不到改名后的消息。
-    </div>
-    <div class="edit-popup-actions">
-      <button class="edit-btn cancel-btn">取消</button>
-      <button class="edit-btn primary save-btn">保存</button>
-    </div>
-    <div class="edit-status" id="editStatus"> </div>
-  `;
-
-  badgeEl.appendChild(popup);
-
-  const idInput = popup.querySelector('.edit-id-input');
-  idInput.focus();
-  idInput.setSelectionRange(idInput.value.length, idInput.value.length);
-
-  // Show rename warning when ID changes
-  idInput.addEventListener('input', () => {
-    const warn = popup.querySelector('#renameWarn');
-    warn.style.display = (idInput.value.trim() !== agent.id) ? 'block' : 'none';
-    validateIdInput(idInput);
-  });
-
-  // Save
-  popup.querySelector('.save-btn').addEventListener('click', () => saveAgentConfig(agent, popup));
-  popup.querySelector('.cancel-btn').addEventListener('click', closeEditPopup);
-
-  // Keyboard
-  popup.querySelectorAll('input').forEach(inp => {
-    inp.addEventListener('keydown', e => {
-      if (e.key === 'Enter') saveAgentConfig(agent, popup);
-      if (e.key === 'Escape') closeEditPopup();
-    });
-  });
-
-  // Outside click: persistent listener (not once: true)
-  setTimeout(() => {
-    if (state.popupCloseHandler) document.removeEventListener('click', state.popupCloseHandler);
-    state.popupCloseHandler = e => {
-      if (!e.target.closest('.edit-popup') && !e.target.closest('.agent-badge.editing')) {
-        closeEditPopup();
-      }
-    };
-    document.addEventListener('click', state.popupCloseHandler);
-  }, 10);
-}
-
-function validateIdInput(input) {
-  const errEl = input.parentElement.querySelector('.edit-error-msg');
-  const val = input.value.trim();
-  if (!val) {
-    errEl.textContent = 'ID 不能为空';
-    input.classList.add('field-error');
-    return false;
-  }
-  if (!VALID_ID_RE.test(val)) {
-    errEl.textContent = '只能使用字母、数字、连字符、下划线';
-    input.classList.add('field-error');
-    return false;
-  }
-  errEl.textContent = '';
-  input.classList.remove('field-error');
-  return true;
-}
-
-function closeEditPopup() {
-  // Remove the persistent click handler
-  if (state.popupCloseHandler) {
-    document.removeEventListener('click', state.popupCloseHandler);
-    state.popupCloseHandler = null;
-  }
-  document.querySelectorAll('.edit-popup').forEach(el => el.remove());
-  document.querySelectorAll('.agent-badge.editing').forEach(el => el.classList.remove('editing'));
-  state.editingBadge = null;
-}
-
-async function saveAgentConfig(agent, popup) {
-  const statusEl = popup.querySelector('#editStatus');
-  const idInput = popup.querySelector('.edit-id-input');
-  const nameInput = popup.querySelector('.edit-name-input');
-  const colorInput = popup.querySelector('.edit-color-input');
-  const newId = idInput.value.trim();
-  const newName = nameInput.value.trim();
-  const newColor = colorInput.value.trim();
-
-  // Validate
-  if (!validateIdInput(idInput)) return;
-  if (!/^#[0-9a-fA-F]{6}$/.test(newColor)) {
-    statusEl.textContent = '颜色格式错误，使用 #rrggbb';
-    statusEl.className = 'edit-status error';
+// ═══ Activity ═══
+async function loadActivity() {
+  const data = await apiPost('/api/poll/history', {limit: 50});
+  if (!data || !data.ok || !data.history || !data.history.length) {
+    activityArea.innerHTML = '<div class="activity-empty"><div style="font-size:2.5em;opacity:0.4">📡</div><h3 style="color:var(--text2);font-weight:500;margin-top:8px;font-size:1em">暂无活动记录</h3><p style="color:var(--text3);font-size:0.85em;margin-top:4px">轮询运行后这里会显示检查结果。</p></div>';
     return;
   }
-
-  statusEl.textContent = '保存中…';
-  statusEl.className = 'edit-status';
-
-  const agentsPayload = state.agents.map(a => {
-    if (a.id === agent.id) {
-      return {
-        id: newId,
-        old_id: (newId !== agent.id) ? agent.id : undefined,
-        display_name: newName || newId,
-        color: newColor,
-      };
-    }
-    return { id: a.id, display_name: a.display_name, color: a.color };
-  });
-
-  const result = await apiPost('/api/config', { agents: agentsPayload });
-  if (result && result.ok) {
-    const changeText = result.changes?.length ? ' (' + result.changes.join(', ') + ')' : '';
-    statusEl.textContent = '✓ 已保存' + changeText;
-    statusEl.className = 'edit-status ok';
-    await loadConfig();
-    await loadMessages();
-    setTimeout(closeEditPopup, 800);
-  } else {
-    statusEl.textContent = '保存失败: ' + (result?.error || 'unknown');
-    statusEl.className = 'edit-status error';
-  }
-}
-
-// ═══ Render messages ═══
-function resolveAgent(sender) {
-  // Priority: current agentMap > alias > fallback
-  return state.agentMap[sender] || state.agentAlias[sender] || {
-    display_name: sender,
-    color: '#8888a0',
-  };
-}
-
-function renderMessages() {
-  const msgs = state.messages;
-  if (msgs.length === 0) {
-    chatArea.innerHTML =
-      '<div class="empty-state"><div class="icon">💬</div><h3>暂无消息</h3>' +
-      '<p>对话文件存在但暂无消息。等 agent 双方开始通信后，消息将在这里显示。</p></div>';
-    return;
-  }
-
   let html = '';
-  let lastDate = '';
-  const ids = state.agentIds;
-
-  for (const msg of msgs) {
-    const sender = msg.from || 'unknown';
-    const ts = msg.ts || '';
-    const date = ts.slice(0, 10);
-    const time = ts.slice(11, 19);
-    const text = msg.msg || '';
-    const source = msg._source === 'active' ? '' : `📦 ${msg._source}`;
-
-    if (date !== lastDate) {
-      html += `<div class="date-separator"><span>${date}</span></div>`;
-      lastDate = date;
-    }
-
-    const idx = ids.indexOf(sender);
-    const side = (idx >= 0 && ids.length >= 2) ? (idx % 2 === 0 ? 'left' : 'right') : 'left';
-    const info = resolveAgent(sender);
-    const color = info.color;
-
-    html += `
-      <div class="message-group ${side}">
-        <div class="msg-avatar ${side}"
-             style="background:${color}22; color:${color}; border-color:${color}44">
-          ${esc(sender.charAt(0).toUpperCase())}
-        </div>
-        <div class="msg-bubble ${side}" style="border-left-color:${side==='left'?color:''};border-right-color:${side==='right'?color:''}">
-          <div class="msg-header">
-            <span class="msg-sender" style="color:${color}">${esc(info.display_name)}</span>
-            <span class="msg-time">${time}</span>
-            ${source ? `<span class="msg-source">${source}</span>` : ''}
-          </div>
-          <div class="msg-text">${esc(text)}</div>
-        </div>
-      </div>`;
+  for (const h of data.history.slice().reverse()) {
+    const ts = h.ts || '', time = ts.slice(11,19);
+    let icon = '○', title = '轮询检查', detail = '无新消息', cls = '';
+    if (h.archived) { icon = '📦'; title = '归档'; detail = `已归档为 ${h.archived}`; }
+    else if (h.delivered) { icon = '→'; title = `发送 ${h.new_msgs} 条消息给 ${h.to_agent}`; detail = '已投递'; }
+    else if (h.error) { icon = '✗'; title = '轮询失败'; detail = h.error; cls = 'error'; }
+    html += `<div class="activity-item">
+      <span class="activity-time">${time}</span>
+      <span class="activity-icon">${icon}</span>
+      <div class="activity-body">
+        <div class="activity-title">${title}</div>
+        <div class="activity-detail ${cls}">${detail}</div>
+      </div></div>`;
   }
-  chatArea.innerHTML = html;
+  activityArea.innerHTML = html;
 }
 
-function updateStats() {
-  const msgs = state.messages;
-  statCount.textContent = msgs.length;
-  statLast.textContent = msgs.length > 0 ? msgs[msgs.length - 1].ts || '—' : '—';
-}
-
-function esc(t) {
-  const d = document.createElement('div');
-  d.textContent = t;
-  return d.innerHTML;
-}
-
-// ═══ Controls ═══
-let searchTimeout;
-searchInput.addEventListener('input', () => {
-  clearTimeout(searchTimeout);
-  searchTimeout = setTimeout(() => {
-    state.searchQuery = searchInput.value.trim();
-    loadMessages();
-  }, 300);
-});
-
-archiveSelect.addEventListener('change', () => {
-  state.archive = archiveSelect.value;
-  loadMessages();
-});
-
-refreshBtn.addEventListener('click', refreshAll);
-
-// Archive button
-archiveBtn.addEventListener('click', async () => {
-  if (!confirm('归档当前对话？归档后 active.jsonl 将被清空。')) return;
-  const result = await apiPost('/api/archive', {});
-  if (result && result.ok) {
-    await loadArchives();
-    await refreshAll();
-  } else {
-    alert('归档失败: ' + (result?.error || 'unknown'));
-  }
-});
-
-// Auto refresh
-function startAutoRefresh() {
-  stopAutoRefresh();
-  state.pollInterval = setInterval(() => {
-    if (!document.hidden) {
-      refreshAll();
-    }
-  }, 5000);
-  // Poll status refreshes more frequently
-  pollStatusTimer = setInterval(() => {
-    if (!document.hidden) loadPollStatus();
-  }, 3000);
-}
-function stopAutoRefresh() {
-  if (state.pollInterval) { clearInterval(state.pollInterval); state.pollInterval = null; }
-  if (pollStatusTimer) { clearInterval(pollStatusTimer); pollStatusTimer = null; }
-}
-autoDot.addEventListener('click', () => {
-  state.autoRefresh = !state.autoRefresh;
-  autoDot.classList.toggle('paused', !state.autoRefresh);
-  autoLabel.textContent = state.autoRefresh ? '实时' : '暂停';
-  if (state.autoRefresh) startAutoRefresh(); else stopAutoRefresh();
-});
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && state.autoRefresh) refreshAll();
-});
-
-async function refreshAll() {
-  await Promise.all([loadConfig(), loadMessages(), loadStatus(), loadPollStatus()]);
+// ═══ Settings (yaml) ═══
+async function loadYaml() {
+  const data = await apiGet('/api/bridge/yaml');
+  if (data && data.ok) yamlEditor.value = data.yaml;
+  else yamlEditor.value = '# bridge.yaml not found';
 }
 
 // ═══ Poll control ═══
-let pollStatusTimer = null;
-
 async function loadPollStatus() {
-  const data = await apiGet('/api/poll');
-  if (!data || !data.ok) return;
-  const running = data.running;
-  pollDot.className = 'poll-dot ' + (running ? 'active' : 'stopped');
-  pollLabel.textContent = running ? '轮询中' : '已暂停';
-  pollBtn.textContent = running ? '∥' : '▶';
-  pollBtn.title = running ? '暂停轮询' : '启动轮询';
-
-  if (data.last_run) {
-    const time = data.last_run.slice(11, 19);
-    statLast.textContent = time;
-  }
+  const d = await apiGet('/api/poll');
+  if (!d || !d.ok) return;
+  const run = d.running;
+  pollDot.className = 'poll-dot ' + (run ? 'active' : 'stopped');
+  pollLabel.textContent = run ? '轮询中' : '已暂停';
+  pollBtn.textContent = run ? '∥' : '▶';
 }
-
 pollBtn.addEventListener('click', async () => {
-  const data = await apiGet('/api/poll');
-  const running = data && data.running;
-  if (running) {
-    await apiPost('/api/poll/stop', {});
-  } else {
-    await apiPost('/api/poll/start', {});
-  }
+  const d = await apiGet('/api/poll');
+  if (d && d.running) await apiPost('/api/poll/stop', {});
+  else await apiPost('/api/poll/start', {});
   await loadPollStatus();
+  await renderCards();
+});
+pollBtn.addEventListener('dblclick', async () => {
+  const r = await apiPost('/api/poll/now', {});
+  if (r && r.ok) { await refreshAll(); await loadActivity(); }
 });
 
-// Double-click poll button to trigger immediate poll
-pollBtn.addEventListener('dblclick', async () => {
-  const result = await apiPost('/api/poll/now', {});
-  if (result && result.ok) {
-    await refreshAll();
-  }
+// ═══ Tab switching ═══
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    const pane = document.getElementById('pane-' + btn.dataset.tab);
+    if (pane) pane.classList.add('active');
+    state.activeTab = btn.dataset.tab;
+    // Lazy load
+    if (btn.dataset.tab === 'activity') loadActivity();
+    if (btn.dataset.tab === 'settings') loadYaml();
+  });
 });
+
+// ═══ Auto refresh ═══
+function startAutoRefresh() {
+  stopAutoRefresh();
+  state.pollInterval = setInterval(() => { if (!document.hidden) refreshAll(); }, 5000);
+  state.pollStatusTimer = setInterval(() => { if (!document.hidden) loadPollStatus(); }, 3000);
+}
+function stopAutoRefresh() {
+  if (state.pollInterval) { clearInterval(state.pollInterval); state.pollInterval = null; }
+  if (state.pollStatusTimer) { clearInterval(state.pollStatusTimer); state.pollStatusTimer = null; }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && state.autoRefresh) refreshAll(); });
+async function refreshAll() { await Promise.all([loadConfig(), loadMessages(), loadStatus(), loadPollStatus()]); }
+async function loadStatus() {
+  const d = await apiGet('/api/status');
+  if (!d || !d.ok) return;
+  statCount.textContent = d.active.count;
+}
 
 // ═══ Init ═══
 async function init() {
@@ -765,6 +797,7 @@ async function init() {
   await loadArchives();
   await refreshAll();
   startAutoRefresh();
+  loadPollStatus();
 }
 init();
 </script>
