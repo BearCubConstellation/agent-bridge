@@ -31,6 +31,8 @@ from poll import run_poll, load_config as load_poll_config
 
 BRIDGE_FILENAME = "bridge.yaml"
 VALID_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
+# validate_agent_id 复用 core/send.py 的实现
+from send import validate_agent_id  # noqa: E402
 DEFAULT_POLL_INTERVAL = 180  # 秒
 
 
@@ -44,14 +46,8 @@ def find_shared_dir():
     return Path.home() / ".agent-bridge"
 
 
-def parse_jsonl(filepath):
-    if not filepath or not filepath.exists():
-        return []
-    try:
-        with open(filepath) as f:
-            return [json.loads(line) for line in f if line.strip()]
-    except (OSError, json.JSONDecodeError):
-        return []
+# parse_jsonl 从 core/poll.py 导入（避免重复定义）
+from poll import parse_jsonl  # noqa: E402
 
 
 def default_agents(shared_dir):
@@ -76,6 +72,7 @@ def default_agents(shared_dir):
 
 def read_bridge(shared_dir):
     config_path = Path(shared_dir) / BRIDGE_FILENAME
+    cfg = None
     if config_path.exists():
         # 先尝试 yaml，失败再尝试 json
         try:
@@ -87,13 +84,13 @@ def read_bridge(shared_dir):
         except Exception:
             pass
         # json fallback (仅在 yaml 不可用或失败时)
-        if 'cfg' not in dir():
+        if cfg is None:
             try:
                 with open(config_path) as f:
                     cfg = json.load(f)
             except Exception:
                 cfg = {}
-    else:
+    if cfg is None:
         cfg = {}
 
     cfg.setdefault("shared_dir", str(shared_dir))
@@ -128,10 +125,6 @@ def rename_cursor(shared_dir, old_id, new_id):
             old_path.rename(new_path)
             renamed = True
     return renamed
-
-
-def validate_agent_id(aid):
-    return bool(aid and VALID_ID_RE.match(aid))
 
 
 # ─── 后台轮询 ─────────────────────────────────────────
@@ -263,7 +256,11 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
 
     def serve_static(self, filename):
         script_dir = Path(__file__).resolve().parent
-        filepath = script_dir / filename
+        filepath = (script_dir / filename).resolve()
+        # 防止路径遍历：确保解析后的路径仍在 script_dir 下
+        if not filepath.is_relative_to(script_dir):
+            self.send_error(403)
+            return
         if not filepath.exists():
             self.send_error(404)
             return
@@ -654,8 +651,11 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-        # 仅允许 localhost 来源（绑定 127.0.0.1 已限制网络层）
-        self.send_header("Access-Control-Allow-Origin", "http://127.0.0.1:*")
+        # 动态回显请求 Origin，仅允许可信的 localhost 来源
+        origin = self.headers.get("Origin", "")
+        if origin and re.match(r'^http://127\.0\.0\.1:\d+$', origin):
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
         self.end_headers()
         self.wfile.write(text.encode("utf-8"))
 

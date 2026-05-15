@@ -77,12 +77,8 @@ function Install-Cli {
     New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 
     # 创建 wrapper 脚本
-    $wrapper = @"
-@echo off
-$pyPath `%SRC_DIR%`\cli\bridge %*
-"@
-    $bridgeBat = "$binDir\bridge.bat"
     $wrapper = "@echo off`n$pyPath `"$SrcDir\cli\bridge`" %*"
+    $bridgeBat = "$binDir\bridge.bat"
     Set-Content -Path $bridgeBat -Value $wrapper -Encoding ASCII
     Write-Ok "CLI 已安装: $bridgeBat"
 

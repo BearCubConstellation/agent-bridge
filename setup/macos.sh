@@ -52,7 +52,7 @@ cat > "$PLIST_PATH" <<EOF
   <string>$LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/python3</string>
+    <string>$(command -v python3)</string>
     <string>$POLL_SCRIPT</string>
     <string>--config</string>
     <string>$CONFIG_PATH</string>

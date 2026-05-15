@@ -72,7 +72,7 @@ def validate_agent_id(aid):
     return True
 
 
-def send(agent_id, active_file, text):
+def send(agent_id, active_file, text, quiet=False):
     """向 active.jsonl 追加一条消息。"""
     if not validate_agent_id(agent_id):
         print(f"Error: invalid agent ID '{agent_id}'. Use only letters, numbers, hyphens, underscores.",
@@ -91,7 +91,8 @@ def send(agent_id, active_file, text):
             f.write(json.dumps(msg, ensure_ascii=False) + "\n")
         finally:
             unlock_file(f)
-    print(f"[{agent_id}] ✓ Message sent ({len(text)} chars)")
+    if not quiet:
+        print(f"[{agent_id}] ✓ Message sent ({len(text)} chars)")
 
 
 def main():

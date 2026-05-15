@@ -47,16 +47,22 @@ def _load_config():
     config_path = _find_config()
     if not config_path or not config_path.exists():
         return {}
+    # 先尝试 yaml
     try:
         import yaml
         with open(config_path) as f:
             return yaml.safe_load(f) or {}
-    except (ImportError, Exception):
-        try:
-            with open(config_path) as f:
-                return json.load(f)
-        except Exception:
-            return {}
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"  Warning: YAML parse error: {e}", file=sys.stderr)
+    # json fallback
+    try:
+        with open(config_path) as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"  Warning: JSON parse error: {e}", file=sys.stderr)
+        return {}
 
 
 def _find_config():
@@ -395,6 +401,7 @@ def cmd_start(args):
 
     log_f = open(LOG_FILE, "a")
     proc = subprocess.Popen(cmd, stdout=log_f, stderr=log_f, start_new_session=True)
+    log_f.close()  # Popen 已继承 fd，Python 侧关闭避免泄漏
 
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     PID_FILE.write_text(str(proc.pid))
@@ -523,7 +530,7 @@ def cmd_send(args):
         sys.exit(1)
 
     active_file = find_active_jsonl(shared_dir)
-    _send(agent_id, active_file, text)
+    _send(agent_id, active_file, text, quiet=False)
 
 
 def cmd_open(args):
