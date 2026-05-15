@@ -872,7 +872,8 @@ async function loadActivity() {
 }
 
 // ═══ Settings (form-based editor) ═══
-function escAttr(s) { return String(s).replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escAttr(s) { return esc(s); }
 
 function bodyTemplateToText(bt) {
   if (!bt) return '{}';
