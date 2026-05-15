@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Bridge · 聊天时间线</title>
+<style>
+:root {
+  --bg: #0a0a0f;
+  --surface: #12121e;
+  --surface2: #1a1a2e;
+  --surface3: #222236;
+  --text: #e0e0f0;
+  --text2: #8888a0;
+  --text3: #5a5a70;
+  --border: #1e1e32;
+  --accent: #e94560;
+  --green: #4ecdc4;
+  --red: #ff6b6b;
+  --amber: #ffd93d;
+  --gradient: linear-gradient(135deg, var(--red), #e94560);
+  --font: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+  --font-ui: -apple-system, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  --radius: 10px;
+  --radius-sm: 6px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+.header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 24px;
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 10px;
+  position: sticky; top: 0; z-index: 100;
+  backdrop-filter: blur(8px);
+}
+.header-left { display: flex; align-items: center; gap: 14px; }
+.logo {
+  font-family: var(--font); font-size: 1.1em; font-weight: 700;
+  background: var(--gradient);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text; letter-spacing: -0.5px;
+}
+.header-sub { color: var(--text3); font-size: 0.8em; font-family: var(--font); }
+.header-right { display: flex; align-items: center; gap: 8px; }
+
+.agent-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 0.82em; padding: 5px 12px;
+  background: var(--surface2); border-radius: 20px;
+  border: 1px solid var(--border); cursor: pointer;
+  transition: all 0.2s; position: relative;
+}
+.agent-badge:hover { border-color: var(--text3); background: var(--surface3); }
+.agent-badge.editing { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.agent-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.badge-edit-icon { font-size: 0.7em; opacity: 0.4; margin-left: 2px; }
+.agent-badge:hover .badge-edit-icon { opacity: 0.8; }
+
+.edit-popup {
+  position: absolute; top: calc(100% + 8px); right: 0;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; min-width: 220px;
+  z-index: 200; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none;
+}
+.edit-popup.open { display: block; }
+.edit-field { margin-bottom: 10px; }
+.edit-field label {
+  display: block; font-size: 0.72em; color: var(--text3);
+  margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.edit-field input, .edit-field select {
+  width: 100%; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text); padding: 7px 10px; font-size: 0.85em;
+  font-family: var(--font-ui); outline: none; transition: border-color 0.2s;
+}
+.edit-field input:focus { border-color: var(--accent); }
+.edit-field .field-error { border-color: var(--red); }
+.edit-error-msg { font-size: 0.72em; color: var(--red); margin-top: 2px; min-height: 1em; }
+.edit-rename-warn {
+  background: rgba(255,217,61,0.1); border: 1px solid rgba(255,217,61,0.3);
+  border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 10px;
+  font-size: 0.75em; color: var(--amber); line-height: 1.5;
+}
+.edit-popup-actions { display: flex; gap: 6px; margin-top: 10px; }
+.edit-btn {
+  flex: 1; padding: 6px 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text2); font-size: 0.8em; cursor: pointer;
+  transition: all 0.15s; font-family: var(--font-ui);
+}
+.edit-btn:hover { background: var(--surface3); color: var(--text); }
+.edit-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.edit-btn.primary:hover { opacity: 0.9; }
+.edit-btn.danger { background: var(--red); border-color: var(--red); color: #fff; }
+.edit-status { font-size: 0.75em; margin-top: 6px; min-height: 1.2em; }
+.edit-status.ok { color: var(--green); }
+.edit-status.error { color: var(--red); }
+
+.controls {
+  background: var(--surface); padding: 12px 24px;
+  display: flex; align-items: center; gap: 12px;
+  flex-wrap: wrap; border-bottom: 1px solid var(--border);
+}
+.controls input, .controls select {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text);
+  padding: 8px 12px; font-size: 0.85em; font-family: var(--font-ui);
+  outline: none; transition: border-color 0.2s;
+}
+.controls input:focus, .controls select:focus { border-color: var(--accent); }
+.controls input::placeholder { color: var(--text3); }
+.search-box { flex: 1; min-width: 180px; max-width: 320px; }
+.archive-select { min-width: 160px; }
+.refresh-btn {
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text2); padding: 8px 14px;
+  border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 0.85em; transition: all 0.2s; font-family: var(--font-ui);
+}
+.refresh-btn:hover { background: var(--surface3); color: var(--text); }
+.refresh-btn:active { transform: scale(0.96); }
+.auto-refresh-label {
+  color: var(--text3); font-size: 0.8em;
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+}
+.auto-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); transition: opacity 0.3s; }
+.auto-dot.paused { background: var(--text3); opacity: 0.5; }
+
+.chat-area { max-width: 860px; margin: 0 auto; padding: 20px 24px 60px; }
+.empty-state { text-align: center; padding: 80px 20px; color: var(--text3); }
+.empty-state .icon { font-size: 3em; margin-bottom: 12px; opacity: 0.4; }
+.empty-state h3 { color: var(--text2); font-weight: 500; margin-bottom: 8px; font-size: 1.1em; }
+.empty-state p { font-size: 0.88em; max-width: 400px; margin: 0 auto; line-height: 1.7; }
+
+.date-separator { text-align: center; margin: 24px 0 16px; position: relative; }
+.date-separator::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%;
+  height: 1px; background: var(--border);
+}
+.date-separator span {
+  background: var(--bg); color: var(--text3); font-size: 0.78em;
+  font-family: var(--font); padding: 0 12px; position: relative; letter-spacing: 0.5px;
+}
+
+.message-group { display: flex; gap: 10px; margin-bottom: 16px; animation: fadeIn 0.3s ease; }
+.message-group.left { flex-direction: row; }
+.message-group.right { flex-direction: row-reverse; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+.msg-avatar {
+  flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.85em; font-weight: 700; font-family: var(--font);
+  margin-top: 2px; user-select: none; border-width: 1px; border-style: solid;
+}
+.msg-bubble {
+  max-width: 75%; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 12px 16px; position: relative;
+}
+.msg-bubble.left { border-top-left-radius: 4px; }
+.msg-bubble.right { border-top-right-radius: 4px; }
+.msg-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.msg-sender { font-size: 0.82em; font-weight: 600; }
+.msg-time { font-size: 0.72em; color: var(--text3); font-family: var(--font); }
+.msg-source { font-size: 0.7em; color: var(--text3); margin-left: auto; opacity: 0.6; }
+.msg-text { font-size: 0.92em; line-height: 1.65; color: var(--text); word-break: break-word; white-space: pre-wrap; }
+
+.footer-stats {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--surface); border-top: 1px solid var(--border);
+  padding: 10px 24px; display: flex; align-items: center;
+  justify-content: space-between; font-size: 0.78em;
+  color: var(--text3); font-family: var(--font); backdrop-filter: blur(8px); z-index: 100;
+}
+.stat-item { display: flex; align-items: center; gap: 6px; }
+.stat-value { color: var(--text2); }
+.stat-sep { opacity: 0.3; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--surface3); }
+
+@media (max-width: 600px) {
+  .header { padding: 12px 16px; }
+  .controls { padding: 10px 16px; }
+  .chat-area { padding: 12px 12px 70px; }
+  .msg-bubble { max-width: 88%; }
+  .msg-avatar { width: 30px; height: 30px; font-size: 0.75em; }
+  .header-sub { display: none; }
+  .archive-select { min-width: 120px; }
+}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-left">
+    <div class="logo">agent-bridge</div>
+    <span class="header-sub">聊天时间线</span>
+  </div>
+  <div class="header-right" id="agentBadgeContainer"></div>
+</header>
+
+<div class="controls">
+  <input class="search-box" id="searchInput" type="text" placeholder="搜索消息…" />
+  <select class="archive-select" id="archiveSelect">
+    <option value="__active__">📄 当前对话</option>
+  </select>
+  <button class="refresh-btn" id="refreshBtn" title="手动刷新">⟳</button>
+  <label class="auto-refresh-label">
+    <span class="auto-dot" id="autoDot"></span>
+    <span id="autoLabel">实时</span>
+  </label>
+  <button class="refresh-btn" id="archiveBtn" title="归档当前对话" style="margin-left:auto;">📦</button>
+</div>
+
+<div class="chat-area" id="chatArea">
+  <div class="empty-state">
+    <div class="icon">💬</div>
+    <h3>等待消息…</h3>
+    <p>未检测到对话文件。确认 agent-bridge 已正确配置且双方已开始通信。</p>
+  </div>
+</div>
+
+<div class="footer-stats">
+  <div class="stat-item">
+    <span>消息</span>
+    <span class="stat-value" id="statCount">—</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-sep">·</span>
+    <span>最后活动</span>
+    <span class="stat-value" id="statLast">—</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-sep">·</span>
+    <span>文件</span>
+    <span class="stat-value" id="statFile">—</span>
+  </div>
+  <div class="stat-item" style="margin-left:auto;">
+    <span>轮询</span>
+    <span class="stat-value" id="statPoll">5s</span>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  Agent Bridge · Chat Timeline
+// ============================================================
+
+const VALID_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
+let state = {
+  messages: [],
+  agents: [],
+  agentIds: [],
+  // agentMap: current ID → {display_name, color}
+  // agentAlias: any from value seen in messages → {display_name, color}
+  //   (so old messages still resolve after rename)
+  agentMap: {},
+  agentAlias: {},
+  archive: '__active__',
+  searchQuery: '',
+  autoRefresh: true,
+  pollInterval: null,
+  editingBadge: null,
+  popupCloseHandler: null,
+};
+
+const $ = s => document.querySelector(s);
+const chatArea = $('#chatArea');
+const searchInput = $('#searchInput');
+const archiveSelect = $('#archiveSelect');
+const refreshBtn = $('#refreshBtn');
+const archiveBtn = $('#archiveBtn');
+const autoDot = $('#autoDot');
+const autoLabel = $('#autoLabel');
+const badgeContainer = $('#agentBadgeContainer');
+const statCount = $('#statCount');
+const statLast = $('#statLast');
+const statFile = $('#statFile');
+
+// ═══ API ═══
+async function apiGet(path) {
+  try { const r = await fetch(path); return await r.json(); } catch (e) { return null; }
+}
+async function apiPost(path, data) {
+  try {
+    const r = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return await r.json();
+  } catch (e) { return null; }
+}
+
+// ═══ Load functions ═══
+async function loadConfig() {
+  const data = await apiGet('/api/config');
+  if (!data || !data.ok) return;
+  const agents = data.agents || [];
+  state.agents = agents;
+  state.agentIds = agents.map(a => a.id);
+  const newMap = {};
+  for (const a of agents) {
+    newMap[a.id] = {
+      display_name: a.display_name || a.id,
+      color: a.color || '#8888a0',
+    };
+  }
+  // Preserve aliases: old IDs that appeared in messages still map to a known agent
+  // Only keep aliases whose target still exists
+  const oldAliases = state.agentAlias || {};
+  state.agentAlias = {};
+  for (const [oldId, info] of Object.entries(oldAliases)) {
+    // If the old alias points to a current agent, keep it
+    const current = newMap[info.id] || newMap[oldId];
+    if (current) {
+      state.agentAlias[oldId] = { ...current, id: info.id || oldId };
+    }
+  }
+  state.agentMap = newMap;
+  renderBadges();
+}
+
+async function buildAliasesFromMessages() {
+  // Scan all messages and map unknown from values to known agents
+  for (const msg of state.messages) {
+    const sender = msg.from;
+    if (!sender) continue;
+    if (state.agentMap[sender]) continue; // already known
+    if (state.agentAlias[sender]) continue; // already aliased
+
+    // Find the closest known agent by ID similarity
+    let bestMatch = null;
+    let bestScore = 0;
+    for (const [knownId, info] of Object.entries(state.agentMap)) {
+      // If sender starts with the known ID or vice versa
+      if (sender.startsWith(knownId) || knownId.startsWith(sender)) {
+        const score = Math.min(sender.length, knownId.length);
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = knownId;
+        }
+      }
+    }
+    if (bestMatch) {
+      state.agentAlias[sender] = { ...state.agentMap[bestMatch], id: bestMatch };
+    } else {
+      state.agentAlias[sender] = {
+        display_name: sender,
+        color: '#8888a0',
+        id: sender,
+      };
+    }
+  }
+}
+
+async function loadMessages() {
+  const params = new URLSearchParams();
+  if (state.archive !== '__active__') params.set('archive', state.archive);
+  if (state.searchQuery) params.set('q', state.searchQuery);
+  params.set('limit', '500');
+
+  const data = await apiGet(`/api/messages?${params}`);
+  if (!data || !data.ok) return;
+  state.messages = data.messages || [];
+  await buildAliasesFromMessages();
+  renderMessages();
+  updateStats();
+}
+
+async function loadArchives() {
+  const data = await apiGet('/api/status');
+  if (!data || !data.ok) return;
+  archiveSelect.innerHTML = '<option value="__active__">📄 当前对话</option>';
+  if (data.history) {
+    for (const h of data.history) {
+      const opt = document.createElement('option');
+      opt.value = h.name;
+      const datePart = h.name.replace('.jsonl', '');
+      opt.textContent = `📦 ${datePart} (${h.count} 条)`;
+      archiveSelect.appendChild(opt);
+    }
+  }
+}
+
+async function loadStatus() {
+  const data = await apiGet('/api/status');
+  if (!data || !data.ok) return;
+  statCount.textContent = data.active.count;
+  const hc = data.history_count || 0;
+  statFile.textContent = hc > 0 ? `active + ${hc} archive` : 'active only';
+}
+
+// ═══ Agent badges (clickable to edit) ═══
+function renderBadges() {
+  badgeContainer.innerHTML = '';
+  for (const agent of state.agents) {
+    const badge = document.createElement('div');
+    badge.className = 'agent-badge';
+    badge.dataset.agentId = agent.id;
+    badge.innerHTML = `
+      <span class="agent-dot" style="background:${agent.color}"></span>
+      <span class="badge-name">${esc(agent.display_name || agent.id)}</span>
+      <span class="badge-edit-icon">✎</span>
+    `;
+    badge.addEventListener('click', e => {
+      e.stopPropagation();
+      openEditPopup(badge, agent);
+    });
+    badgeContainer.appendChild(badge);
+  }
+}
+
+function openEditPopup(badgeEl, agent) {
+  closeEditPopup();
+  state.editingBadge = agent.id;
+  badgeEl.classList.add('editing');
+
+  const popup = document.createElement('div');
+  popup.className = 'edit-popup open';
+  popup.dataset.agentId = agent.id;
+
+  const idInputId = `edit-id-${agent.id}`;
+  const nameInputId = `edit-name-${agent.id}`;
+  const colorInputId = `edit-color-${agent.id}`;
+
+  popup.innerHTML = `
+    <div class="edit-field">
+      <label>Agent ID</label>
+      <input type="text" id="${idInputId}" class="edit-id-input"
+             value="${esc(agent.id)}" placeholder="e.g. momo, alice">
+      <div class="edit-error-msg" id="error-${idInputId}"></div>
+    </div>
+    <div class="edit-field">
+      <label>显示名称</label>
+      <input type="text" id="${nameInputId}" class="edit-name-input"
+             value="${esc(agent.display_name || agent.id)}" placeholder="Display name">
+    </div>
+    <div class="edit-field">
+      <label>颜色</label>
+      <input type="text" id="${colorInputId}" class="edit-color-input"
+             value="${agent.color}" placeholder="#rrggbb"
+             style="font-family:var(--font);font-size:0.82em">
+    </div>
+    <div class="edit-rename-warn" id="renameWarn" style="display:none">
+      ⚠️ 修改 Agent ID 后，需要<strong>同时更新对方配置</strong>中的
+      <code>filter_from</code>，否则对方收不到改名后的消息。
+    </div>
+    <div class="edit-popup-actions">
+      <button class="edit-btn cancel-btn">取消</button>
+      <button class="edit-btn primary save-btn">保存</button>
+    </div>
+    <div class="edit-status" id="editStatus"> </div>
+  `;
+
+  badgeEl.appendChild(popup);
+
+  const idInput = popup.querySelector('.edit-id-input');
+  idInput.focus();
+  idInput.setSelectionRange(idInput.value.length, idInput.value.length);
+
+  // Show rename warning when ID changes
+  idInput.addEventListener('input', () => {
+    const warn = popup.querySelector('#renameWarn');
+    warn.style.display = (idInput.value.trim() !== agent.id) ? 'block' : 'none';
+    validateIdInput(idInput);
+  });
+
+  // Save
+  popup.querySelector('.save-btn').addEventListener('click', () => saveAgentConfig(agent, popup));
+  popup.querySelector('.cancel-btn').addEventListener('click', closeEditPopup);
+
+  // Keyboard
+  popup.querySelectorAll('input').forEach(inp => {
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') saveAgentConfig(agent, popup);
+      if (e.key === 'Escape') closeEditPopup();
+    });
+  });
+
+  // Outside click: persistent listener (not once: true)
+  setTimeout(() => {
+    if (state.popupCloseHandler) document.removeEventListener('click', state.popupCloseHandler);
+    state.popupCloseHandler = e => {
+      if (!e.target.closest('.edit-popup') && !e.target.closest('.agent-badge.editing')) {
+        closeEditPopup();
+      }
+    };
+    document.addEventListener('click', state.popupCloseHandler);
+  }, 10);
+}
+
+function validateIdInput(input) {
+  const errEl = input.parentElement.querySelector('.edit-error-msg');
+  const val = input.value.trim();
+  if (!val) {
+    errEl.textContent = 'ID 不能为空';
+    input.classList.add('field-error');
+    return false;
+  }
+  if (!VALID_ID_RE.test(val)) {
+    errEl.textContent = '只能使用字母、数字、连字符、下划线';
+    input.classList.add('field-error');
+    return false;
+  }
+  errEl.textContent = '';
+  input.classList.remove('field-error');
+  return true;
+}
+
+function closeEditPopup() {
+  // Remove the persistent click handler
+  if (state.popupCloseHandler) {
+    document.removeEventListener('click', state.popupCloseHandler);
+    state.popupCloseHandler = null;
+  }
+  document.querySelectorAll('.edit-popup').forEach(el => el.remove());
+  document.querySelectorAll('.agent-badge.editing').forEach(el => el.classList.remove('editing'));
+  state.editingBadge = null;
+}
+
+async function saveAgentConfig(agent, popup) {
+  const statusEl = popup.querySelector('#editStatus');
+  const idInput = popup.querySelector('.edit-id-input');
+  const nameInput = popup.querySelector('.edit-name-input');
+  const colorInput = popup.querySelector('.edit-color-input');
+  const newId = idInput.value.trim();
+  const newName = nameInput.value.trim();
+  const newColor = colorInput.value.trim();
+
+  // Validate
+  if (!validateIdInput(idInput)) return;
+  if (!/^#[0-9a-fA-F]{6}$/.test(newColor)) {
+    statusEl.textContent = '颜色格式错误，使用 #rrggbb';
+    statusEl.className = 'edit-status error';
+    return;
+  }
+
+  statusEl.textContent = '保存中…';
+  statusEl.className = 'edit-status';
+
+  const agentsPayload = state.agents.map(a => {
+    if (a.id === agent.id) {
+      return {
+        id: newId,
+        old_id: (newId !== agent.id) ? agent.id : undefined,
+        display_name: newName || newId,
+        color: newColor,
+      };
+    }
+    return { id: a.id, display_name: a.display_name, color: a.color };
+  });
+
+  const result = await apiPost('/api/config', { agents: agentsPayload });
+  if (result && result.ok) {
+    const changeText = result.changes?.length ? ' (' + result.changes.join(', ') + ')' : '';
+    statusEl.textContent = '✓ 已保存' + changeText;
+    statusEl.className = 'edit-status ok';
+    await loadConfig();
+    await loadMessages();
+    setTimeout(closeEditPopup, 800);
+  } else {
+    statusEl.textContent = '保存失败: ' + (result?.error || 'unknown');
+    statusEl.className = 'edit-status error';
+  }
+}
+
+// ═══ Render messages ═══
+function resolveAgent(sender) {
+  // Priority: current agentMap > alias > fallback
+  return state.agentMap[sender] || state.agentAlias[sender] || {
+    display_name: sender,
+    color: '#8888a0',
+  };
+}
+
+function renderMessages() {
+  const msgs = state.messages;
+  if (msgs.length === 0) {
+    chatArea.innerHTML =
+      '<div class="empty-state"><div class="icon">💬</div><h3>暂无消息</h3>' +
+      '<p>对话文件存在但暂无消息。等 agent 双方开始通信后，消息将在这里显示。</p></div>';
+    return;
+  }
+
+  let html = '';
+  let lastDate = '';
+  const ids = state.agentIds;
+
+  for (const msg of msgs) {
+    const sender = msg.from || 'unknown';
+    const ts = msg.ts || '';
+    const date = ts.slice(0, 10);
+    const time = ts.slice(11, 19);
+    const text = msg.msg || '';
+    const source = msg._source === 'active' ? '' : `📦 ${msg._source}`;
+
+    if (date !== lastDate) {
+      html += `<div class="date-separator"><span>${date}</span></div>`;
+      lastDate = date;
+    }
+
+    const idx = ids.indexOf(sender);
+    const side = (idx >= 0 && ids.length >= 2) ? (idx % 2 === 0 ? 'left' : 'right') : 'left';
+    const info = resolveAgent(sender);
+    const color = info.color;
+
+    html += `
+      <div class="message-group ${side}">
+        <div class="msg-avatar ${side}"
+             style="background:${color}22; color:${color}; border-color:${color}44">
+          ${esc(sender.charAt(0).toUpperCase())}
+        </div>
+        <div class="msg-bubble ${side}" style="border-left-color:${side==='left'?color:''};border-right-color:${side==='right'?color:''}">
+          <div class="msg-header">
+            <span class="msg-sender" style="color:${color}">${esc(info.display_name)}</span>
+            <span class="msg-time">${time}</span>
+            ${source ? `<span class="msg-source">${source}</span>` : ''}
+          </div>
+          <div class="msg-text">${esc(text)}</div>
+        </div>
+      </div>`;
+  }
+  chatArea.innerHTML = html;
+}
+
+function updateStats() {
+  const msgs = state.messages;
+  statCount.textContent = msgs.length;
+  statLast.textContent = msgs.length > 0 ? msgs[msgs.length - 1].ts || '—' : '—';
+}
+
+function esc(t) {
+  const d = document.createElement('div');
+  d.textContent = t;
+  return d.innerHTML;
+}
+
+// ═══ Controls ═══
+let searchTimeout;
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => {
+    state.searchQuery = searchInput.value.trim();
+    loadMessages();
+  }, 300);
+});
+
+archiveSelect.addEventListener('change', () => {
+  state.archive = archiveSelect.value;
+  loadMessages();
+});
+
+refreshBtn.addEventListener('click', refreshAll);
+
+// Archive button
+archiveBtn.addEventListener('click', async () => {
+  if (!confirm('归档当前对话？归档后 active.jsonl 将被清空。')) return;
+  const result = await apiPost('/api/archive', {});
+  if (result && result.ok) {
+    await loadArchives();
+    await refreshAll();
+  } else {
+    alert('归档失败: ' + (result?.error || 'unknown'));
+  }
+});
+
+// Auto refresh
+function startAutoRefresh() {
+  stopAutoRefresh();
+  state.pollInterval = setInterval(() => {
+    if (!document.hidden) refreshAll();
+  }, 5000);
+}
+function stopAutoRefresh() {
+  if (state.pollInterval) { clearInterval(state.pollInterval); state.pollInterval = null; }
+}
+autoDot.addEventListener('click', () => {
+  state.autoRefresh = !state.autoRefresh;
+  autoDot.classList.toggle('paused', !state.autoRefresh);
+  autoLabel.textContent = state.autoRefresh ? '实时' : '暂停';
+  if (state.autoRefresh) startAutoRefresh(); else stopAutoRefresh();
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.autoRefresh) refreshAll();
+});
+
+async function refreshAll() {
+  await Promise.all([loadConfig(), loadMessages(), loadStatus()]);
+}
+
+// ═══ Init ═══
+async function init() {
+  await loadConfig();
+  await loadArchives();
+  await refreshAll();
+  startAutoRefresh();
+}
+init();
+</script>
+</body>
+</html>

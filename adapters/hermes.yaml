@@ -1,0 +1,40 @@
+# Agent Bridge — 统一配置模板
+# 本文件是唯一权威配置，UI 和 CLI 共用。
+
+shared_dir: ~/.shared-chat
+
+agents:
+  alice:
+    id: alice
+    display_name: "Alice"
+    color: "#ff6b6b"
+    cursor: line
+    filter_from: bob
+    wakeup:
+      url: "http://127.0.0.1:8644/webhooks/agent-reply"
+      method: POST
+      headers:
+        Content-Type: application/json
+      body_template:
+        message: "{{message}}"
+
+  bob:
+    id: bob
+    display_name: "Bob"
+    color: "#4ecdc4"
+    cursor: timestamp
+    filter_from: alice
+    wakeup:
+      url: "http://127.0.0.1:18789/tools/invoke"
+      method: POST
+      auth:
+        type: bearer
+        token_path: ~/.bob/config.json
+        token_jsonpath: gateway.auth.password
+      headers:
+        Content-Type: application/json
+      body_template:
+        tool: sessions_send
+        args:
+          sessionKey: "agent:main:main"
+          message: "[消息通道·{{from}}] {{message}}\n请回复并追加到 active.jsonl\n格式要求：追加一行 JSON，{\"ts\": \"YYYY-MM-DD HH:MM:SS\", \"from\": \"bob\", \"msg\": \"你的回复\"}"

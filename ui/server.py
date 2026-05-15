@@ -1,0 +1,467 @@
+#!/usr/bin/env python3
+"""
+Agent Bridge — 本地 UI 服务器
+
+聊天时间线 + Agent 身份管理（ID/名称/颜色）。
+读写统一的 bridge.yaml，UI 编辑的结果同步到所有 CLI 工具。
+支持手动归档。
+
+用法:
+    python3 server.py
+    python3 server.py --dir ~/.shared-chat --port 8080
+    python3 server.py --open
+"""
+import argparse
+import http.server
+import json
+import os
+import re
+import shutil
+import sys
+import urllib.parse
+from datetime import datetime
+from pathlib import Path
+
+
+BRIDGE_FILENAME = "bridge.yaml"
+ARCHIVE_MSG_LIMIT = 60
+ARCHIVE_IDLE_MINUTES = 30
+VALID_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
+
+
+# ─── Config utils ────────────────────────────────────
+
+def find_shared_dir():
+    for d in [Path.home() / ".agent-bridge", Path.home() / ".shared-chat"]:
+        active = d / "active.jsonl"
+        if d.exists() and (active.exists() or (d / "history").exists()):
+            return d
+    return Path.home() / ".agent-bridge"
+
+
+def parse_jsonl(filepath):
+    if not filepath or not filepath.exists():
+        return []
+    try:
+        with open(filepath) as f:
+            return [json.loads(line) for line in f if line.strip() and json.loads(line)]
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def default_agents(shared_dir):
+    msgs = parse_jsonl(shared_dir / "active.jsonl")
+    found = set()
+    for m in msgs:
+        if m.get("from"):
+            found.add(m["from"])
+    palette = ["#ff6b6b", "#4ecdc4", "#ffd93d", "#a29bfe", "#fd79a8", "#00cec9"]
+    agents = {}
+    for i, aid in enumerate(sorted(found)):
+        agents[aid] = {
+            "id": aid,
+            "display_name": aid.capitalize(),
+            "color": palette[i % len(palette)],
+            "cursor": "line",
+            "filter_from": "",
+            "wakeup": {"url": "", "method": "POST", "body_template": {"message": "{{message}}"}},
+        }
+    return agents
+
+
+def read_bridge(shared_dir):
+    config_path = Path(shared_dir) / BRIDGE_FILENAME
+    if config_path.exists():
+        try:
+            import yaml
+            with open(config_path) as f:
+                cfg = yaml.safe_load(f) or {}
+        except (ImportError, yaml.YAMLError):
+            import json as _json
+            try:
+                with open(config_path) as f:
+                    cfg = _json.load(f)
+            except (json.JSONDecodeError, Exception):
+                cfg = {}
+    else:
+        cfg = {}
+
+    cfg.setdefault("shared_dir", str(shared_dir))
+    cfg.setdefault("agent_id", "")
+
+    if "agents" not in cfg or not cfg["agents"]:
+        cfg["agents"] = default_agents(shared_dir)
+
+    for key, a in cfg["agents"].items():
+        a.setdefault("display_name", a.get("id", key).capitalize())
+        a.setdefault("color", "#ff6b6b" if list(cfg["agents"].keys())[0] == key else "#4ecdc4")
+        a.setdefault("id", key)
+        a.setdefault("cursor", "line")
+        a.setdefault("wakeup", {"url": "", "method": "POST", "body_template": {"message": "{{message}}"}})
+
+    return cfg, config_path
+
+
+def write_bridge(config_path, config):
+    try:
+        import yaml
+        with open(config_path, "w") as f:
+            yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+    except ImportError:
+        with open(config_path, "w") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+
+
+def rename_cursor(shared_dir, old_id, new_id):
+    renamed = False
+    for ext in ["_cursor", "_ts_cursor"]:
+        old_path = shared_dir / f".{old_id}{ext}"
+        new_path = shared_dir / f".{new_id}{ext}"
+        if old_path.exists() and not new_path.exists():
+            old_path.rename(new_path)
+            renamed = True
+    return renamed
+
+
+def validate_agent_id(aid):
+    return bool(aid and VALID_ID_RE.match(aid))
+
+
+# ─── HTTP handler ────────────────────────────────────
+
+class BridgeHandler(http.server.SimpleHTTPRequestHandler):
+
+    shared_dir = None
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        get_routes = {
+            "/": lambda: self.serve_static("index.html"),
+            "/api/config": self.handle_get_config,
+            "/api/messages": lambda: self.handle_messages(parsed.query),
+            "/api/status": self.handle_status,
+        }
+        if path in get_routes:
+            get_routes[path]()
+        elif path.startswith("/api/history/"):
+            self.handle_history(path)
+        else:
+            self.serve_static(path.lstrip("/"))
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        post_routes = {
+            "/api/config": self.handle_update_config,
+            "/api/archive": self.handle_archive,
+        }
+        handler = post_routes.get(parsed.path)
+        if handler:
+            handler()
+        else:
+            self.send_error(404)
+
+    do_PUT = do_POST
+
+    # ─── Static ──────────────────────────────────────
+
+    def serve_static(self, filename):
+        script_dir = Path(__file__).resolve().parent
+        filepath = script_dir / filename
+        if not filepath.exists():
+            self.send_error(404)
+            return
+        ext = filepath.suffix.lower()
+        ctype = {
+            ".html": "text/html; charset=utf-8",
+            ".css": "text/css; charset=utf-8",
+            ".js": "application/javascript; charset=utf-8",
+            ".json": "application/json",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".svg": "image/svg+xml",
+        }.get(ext, "application/octet-stream")
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.end_headers()
+        with open(filepath, "rb") as f:
+            self.wfile.write(f.read())
+
+    # ─── GET /api/config ─────────────────────────────
+
+    def handle_get_config(self):
+        shared = Path(self.shared_dir)
+        cfg, _ = read_bridge(shared)
+
+        agents_list = []
+        for key, a in cfg.get("agents", {}).items():
+            agents_list.append({
+                "id": a.get("id", key),
+                "display_name": a.get("display_name", key.capitalize()),
+                "color": a.get("color", "#8888a0"),
+            })
+
+        self.send_json({
+            "ok": True,
+            "shared_dir": str(shared),
+            "agent_id": cfg.get("agent_id", ""),
+            "agents": agents_list,
+            "active_exists": (shared / "active.jsonl").exists(),
+        })
+
+    # ─── POST /api/config ────────────────────────────
+
+    def handle_update_config(self):
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            self.send_json({"ok": False, "error": "empty body"})
+            return
+
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self.send_json({"ok": False, "error": "invalid JSON"})
+            return
+
+        shared = Path(self.shared_dir)
+        cfg, config_path = read_bridge(shared)
+        new_agents_input = body.get("agents", [])
+        changes = []
+
+        # Validate all IDs first
+        errors = []
+        for item in new_agents_input:
+            new_id = item.get("id", "").strip()
+            if not validate_agent_id(new_id):
+                errors.append(f"invalid agent ID format: '{new_id}'")
+        if errors:
+            self.send_json({"ok": False, "error": "; ".join(errors)})
+            return
+
+        # Build old_id lookup
+        old_lookup = {}
+        for key, a in cfg.get("agents", {}).items():
+            old_lookup[a["id"]] = (key, a)
+
+        for item in new_agents_input:
+            new_id = item.get("id", "").strip()
+            old_id = item.get("old_id", "")
+            display_name = item.get("display_name", "").strip()
+            color = item.get("color", "").strip()
+
+            if old_id and old_id != new_id and old_id in old_lookup:
+                old_key, old_agent = old_lookup[old_id]
+                if old_key in cfg["agents"]:
+                    del cfg["agents"][old_key]
+                old_agent["id"] = new_id
+                cfg["agents"][new_id] = old_agent
+                cursor_moved = rename_cursor(shared, old_id, new_id)
+                changes.append(f"renamed: {old_id} → {new_id}" + (" (cursor migrated)" if cursor_moved else ""))
+
+            target_key = None
+            if old_id and old_id != new_id and old_id in old_lookup:
+                target_key = new_id
+            elif new_id in old_lookup:
+                target_key = old_lookup[new_id][0]
+            elif new_id in cfg.get("agents", {}):
+                target_key = new_id
+
+            if target_key and target_key in cfg["agents"]:
+                agent = cfg["agents"][target_key]
+                if display_name:
+                    agent["display_name"] = display_name
+                    changes.append(f"display: {display_name}")
+                if color and re.match(r'^#[0-9a-fA-F]{6}$', color):
+                    agent["color"] = color
+                    changes.append("color updated")
+
+        write_bridge(config_path, cfg)
+
+        agents_list = []
+        for key, a in cfg.get("agents", {}).items():
+            agents_list.append({
+                "id": a.get("id", key),
+                "display_name": a.get("display_name", key.capitalize()),
+                "color": a.get("color", "#8888a0"),
+            })
+
+        self.send_json({"ok": True, "agents": agents_list, "changes": changes})
+
+    # ─── POST /api/archive ───────────────────────────
+
+    def handle_archive(self):
+        shared = Path(self.shared_dir)
+        active_file = shared / "active.jsonl"
+
+        if not active_file.exists():
+            self.send_json({"ok": False, "error": "no active file"})
+            return
+
+        msgs = parse_jsonl(active_file)
+        if not msgs:
+            self.send_json({"ok": False, "error": "active file is empty"})
+            return
+
+        history_dir = shared / "history"
+        history_dir.mkdir(parents=True, exist_ok=True)
+
+        now = datetime.now().strftime("%Y-%m-%d_%H%M")
+        archive_name = f"{now}.jsonl"
+        archive_path = history_dir / archive_name
+
+        try:
+            shutil.move(str(active_file), str(archive_path))
+            self.send_json({
+                "ok": True,
+                "archived_to": archive_name,
+                "message_count": len(msgs),
+            })
+        except OSError as e:
+            self.send_json({"ok": False, "error": str(e)})
+
+    # ─── GET /api/messages ───────────────────────────
+
+    def handle_messages(self, query):
+        params = urllib.parse.parse_qs(query)
+        archive = params.get("archive", [None])[0]
+        search = params.get("q", [None])[0]
+        limit = int(params.get("limit", [500])[0])
+
+        shared = Path(self.shared_dir)
+        all_msgs = []
+
+        for m in parse_jsonl(shared / "active.jsonl"):
+            m["_source"] = "active"
+            all_msgs.append(m)
+
+        if archive:
+            for m in parse_jsonl(shared / "history" / archive):
+                m["_source"] = archive
+                all_msgs.append(m)
+        else:
+            hdir = shared / "history"
+            if hdir.exists():
+                for hf in sorted(hdir.iterdir(), reverse=True)[:3]:
+                    for m in parse_jsonl(hf):
+                        m["_source"] = hf.name
+                        all_msgs.append(m)
+
+        if search:
+            q = search.lower()
+            all_msgs = [m for m in all_msgs if q in m.get("msg", "").lower()]
+
+        all_msgs.sort(key=lambda m: m.get("ts", ""))
+        if limit and len(all_msgs) > limit:
+            all_msgs = all_msgs[-limit:]
+
+        self.send_json({"ok": True, "count": len(all_msgs), "messages": all_msgs})
+
+    # ─── GET /api/status ─────────────────────────────
+
+    def handle_status(self):
+        shared = Path(self.shared_dir)
+        active = shared / "active.jsonl"
+        hdir = shared / "history"
+
+        active_msgs = parse_jsonl(active)
+        history_files = []
+        if hdir.exists():
+            for hf in sorted(hdir.iterdir(), reverse=True):
+                msgs = parse_jsonl(hf)
+                history_files.append({
+                    "name": hf.name,
+                    "size": hf.stat().st_size,
+                    "count": len(msgs),
+                    "modified": datetime.fromtimestamp(hf.stat().st_mtime)
+                        .strftime("%Y-%m-%d %H:%M:%S"),
+                })
+
+        self.send_json({
+            "ok": True,
+            "active": {
+                "size": active.stat().st_size if active.exists() else 0,
+                "count": len(active_msgs),
+                "path": str(active),
+            },
+            "history": history_files,
+            "history_count": len(history_files),
+        })
+
+    # ─── GET /api/history/<name> ─────────────────────
+
+    def handle_history(self, path):
+        filename = path.replace("/api/history/", "")
+        if not filename.endswith(".jsonl"):
+            self.send_error(400, "Only .jsonl files")
+            return
+        shared = Path(self.shared_dir)
+        filepath = shared / "history" / filename
+        if not filepath.exists():
+            self.send_error(404)
+            return
+        msgs = parse_jsonl(filepath)
+        self.send_json({"ok": True, "name": filename, "count": len(msgs), "messages": msgs})
+
+    # ─── Helper ──────────────────────────────────────
+
+    def send_json(self, data):
+        text = json.dumps(data, ensure_ascii=False)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(text.encode("utf-8"))
+
+    def log_message(self, fmt, *args):
+        msg = fmt % args
+        if "GET /api/messages" in msg:
+            return
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Agent Bridge — local UI server")
+    parser.add_argument("--dir", "-d", help="Shared chat directory (auto-detect)")
+    parser.add_argument("--port", "-p", type=int, default=7899, help="Port (default: 7899)")
+    parser.add_argument("--host", default="127.0.0.1", help="Bind (default: 127.0.0.1)")
+    parser.add_argument("--open", "-o", action="store_true", help="Open browser")
+
+    args = parser.parse_args()
+    shared_dir = args.dir or str(find_shared_dir())
+    BridgeHandler.shared_dir = shared_dir
+
+    Path(shared_dir).mkdir(parents=True, exist_ok=True)
+
+    cfg, cfg_path = read_bridge(Path(shared_dir))
+    if not cfg_path.exists():
+        write_bridge(cfg_path, cfg)
+
+    server = http.server.HTTPServer((args.host, args.port), BridgeHandler)
+    url = f"http://{args.host}:{args.port}"
+
+    print(f"╔══════════════════════════════════════════╗")
+    print(f"║   Agent Bridge · 本地 UI               ║")
+    print(f"║                                        ║")
+    print(f"║   📁  {shared_dir:<33}║")
+    print(f"║   🌐  {url:<33}║")
+    print(f"║                                        ║")
+    print(f"║   点击 Agent Badge 编辑 ID/名称/颜色    ║")
+    print(f"║   Ctrl+C 停止                          ║")
+    print(f"╚══════════════════════════════════════════╝")
+
+    if args.open:
+        import webbrowser
+        webbrowser.open(url)
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopping...")
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

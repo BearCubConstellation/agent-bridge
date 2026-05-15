@@ -1,0 +1,24 @@
+# Agent Bridge — .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Runtime logs
+*.log
+
+# Agent Bridge user data
+# (These are in the user's home directory, not in the repo)
