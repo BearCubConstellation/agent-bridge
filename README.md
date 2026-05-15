@@ -8,31 +8,103 @@
 ## 原理
 
 ```
-┌──────────────────────────────────────────────┐
-│                  共享目录                      │
-│                                              │
-│  Agent A  ──写入──►  active.jsonl  ◄──写入──  Agent B  │
-│     ▲                        │                    │
-│     │ 每 3min                │ 每 3min            │
-│     ▼                        ▼                    │
-│  poll.py ◄───────── config ────────► poll.py      │
-│     │                        │                    │
-│     ▼                        ▼                    │
-│  POST webhook               POST API              │
-│  (唤醒 Agent A)              (唤醒 Agent B)       │
-└──────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│                    共享目录                           │
+│                                                     │
+│  Agent A ── write ──► active.jsonl ◄── write ── Agent B
+│     ▲                                    ▲
+│     │  poll.py 每 3 分钟检查               │
+│     │  有对方的新消息 → POST webhook       │
+│     ▼                                    ▼
+│  (Agent A 被唤醒)                   (Agent B 被唤醒)
+│                                                     │
+└─────────────────────────────────────────────────────┘
 ```
 
-两个 agent 不直接对话。它们通过一个共享目录下的 `active.jsonl` 文件交换 JSON 消息。
+两个 agent 不直接对话。它们通过共享目录下的 `active.jsonl` 文件交换 JSON 消息。
 每方的轮询脚本（由 cron/launchd/systemd 每 3 分钟调度）检测对方的新消息，
-通过 webhook 唤醒本地 agent。无新消息时脚本零 token 消耗退出。
+有消息时通过 webhook 唤醒本地 agent。无新消息时脚本零 token 消耗，直接退出。
+
+---
 
 ## 快速开始
 
-### 1. 创建配置文件
+### 1. 启动 UI
+
+```bash
+git clone https://github.com/SusuAgent/agent-bridge.git
+cd agent-bridge
+
+python3 ui/server.py --open
+# → http://127.0.0.1:7899
+```
+
+首次运行自动检测已有对话文件，生成 `bridge.yaml`。在页面顶部点击
+Agent Badge 修改 ID、显示名称和颜色。
+
+### 2. 部署轮询脚本
+
+确定本机 agent 的身份（比如 `alice`），运行：
+
+```bash
+# macOS
+bash setup/macos.sh --agent alice \
+  --config /path/to/bridge.yaml
+
+# Linux
+bash setup/linux.sh --agent alice \
+  --config /path/to/bridge.yaml
+```
+
+对方的机器上以同样的方式部署 `bob` 的轮询。
+
+> **提示**：如果你只需要在同一台机器上快速测试两个 agent 的对话，
+> 也可以手动运行 `python3 core/poll.py --config bridge.yaml --agent alice`
+> 来触发单次检查，不需要安装 launchd/systemd。
+
+### 3. 发消息
+
+```bash
+python3 core/send.py --bridge bridge.yaml --agent alice "你好！"
+# 或设置环境变量后省略参数
+export AGENT_ID=alice
+python3 core/send.py "你好！"
+```
+
+对方收到消息后，会通过 webhook 被唤醒，处理并回复。
+
+---
+
+## 项目结构
+
+```
+agent-bridge/
+├── core/
+│   ├── send.py               # 消息发送
+│   └── poll.py               # 轮询 + 自动归档
+├── ui/
+│   ├── index.html            # 聊天时间线
+│   └── server.py             # API + 配置管理
+├── setup/
+│   ├── macos.sh              # macOS launchd 部署
+│   └── linux.sh              # Linux systemd/cron 部署
+├── adapters/
+│   ├── hermes.yaml           # 配置模板 (Hermes ↔ OpenClaw)
+│   └── openclaw.yaml
+├── protocol/SPEC.md          # 通信协议规范
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── SETUP.md
+│   └── CUSTOMIZE.md
+├── README.md
+└── LICENSE
+```
+
+## 配置参考
+
+`bridge.yaml` 在首次启动 UI 时自动生成，你也可以手动编辑：
 
 ```yaml
-# bridge.yaml
 shared_dir: ~/.agent-bridge
 
 agents:
@@ -44,6 +116,7 @@ agents:
     filter_from: bob
     wakeup:
       url: "http://127.0.0.1:8644/webhooks/agent-reply"
+      method: POST
       headers:
         Content-Type: application/json
       body_template:
@@ -57,6 +130,7 @@ agents:
     filter_from: alice
     wakeup:
       url: "http://127.0.0.1:18789/tools/invoke"
+      method: POST
       auth:
         type: bearer
         token_path: ~/.openclaw/openclaw.json
@@ -68,71 +142,20 @@ agents:
           message: "{{message}}"
 ```
 
-### 2. 启动轮询
-
-```bash
-# macOS
-bash setup/macos.sh --agent alice --config ~/agent-bridge.yaml
-bash setup/macos.sh --agent bob --config ~/agent-bridge.yaml
-
-# Linux
-bash setup/linux.sh --agent alice --config ~/agent-bridge.yaml
-```
-
-### 3. 发消息
-
-```bash
-# 从 alice 发给 bob
-python3 core/send.py --bridge bridge.yaml "你好！"
-
-# 或使用环境变量快速发消息
-export AGENT_ID=alice
-python3 core/send.py "你好！"
-```
-
-### 4. 打开 UI
-
-```bash
-python3 ui/server.py
-# → http://127.0.0.1:7899
-```
-
-## 项目结构
-
-```
-agent-bridge/
-├── protocol/SPEC.md          # 通信协议规范
-├── core/
-│   ├── send.py               # 消息发送工具
-│   └── poll.py               # 轮询+唤醒脚本
-├── adapters/
-│   ├── hermes.yaml           # Hermes Agent 适配配置
-│   └── openclaw.yaml         # OpenClaw 适配配置
-├── ui/
-│   ├── index.html            # 聊天时间线页面
-│   └── server.py             # 本地 HTTP API + 配置管理服务
-├── setup/
-│   ├── macos.sh              # macOS launchd 部署
-│   └── linux.sh              # Linux systemd/cron 部署
-└── docs/
-    ├── ARCHITECTURE.md
-    ├── SETUP.md
-    └── CUSTOMIZE.md
-```
+UI 也能修改 ID、名称和颜色，并自动写回 `bridge.yaml`。
 
 ## 适配自己的 Agent
 
-1. 在配置的 `agents` 下添加新 agent，定义：
-   - `id` — 消息发送标识
-   - `cursor` — 游标类型（`line` / `timestamp`）
-   - `filter_from` — 只处理谁的消息
-   - `wakeup` — webhook/API 的 URL、认证、请求体模板
+每个 agent 在配置中需要定义：
 
-2. 在每个 agent 机器上运行轮询脚本
+| 字段          | 说明                                 |
+|---------------|--------------------------------------|
+| `id`          | 发送消息时的 `from` 标识             |
+| `cursor`      | `line`（行号）或 `timestamp`（时间戳） |
+| `filter_from` | 只处理哪个 agent 的消息               |
+| `wakeup`      | webhook/API 的 URL、认证、请求体模板   |
 
-3. 确保共享目录可读写（本地同一台机器，或通过 Syncthing/NFS 同步）
-
-详细见 `docs/CUSTOMIZE.md` 和 `adapters/` 下的示例。
+详细见 `docs/CUSTOMIZE.md`。
 
 ## 消息格式
 
@@ -142,18 +165,18 @@ agent-bridge/
 {"ts": "2026-05-15 14:24:47", "from": "alice", "msg": "你好"}
 ```
 
-| 字段   | 说明                                  |
-|--------|---------------------------------------|
-| `ts`   | `YYYY-MM-DD HH:MM:SS`，24 小时制       |
-| `from` | 发送方标识                            |
-| `msg`  | 消息正文（可换行）                    |
+| 字段   | 说明                            |
+|--------|--------------------------------|
+| `ts`   | `YYYY-MM-DD HH:MM:SS`，24 小时制 |
+| `from` | 发送方标识                      |
+| `msg`  | 消息正文（可换行）              |
 
 ## 依赖
 
 - **运行时**：Python 3.8+（仅标准库）
-- **可选**：`pyyaml`（无时自动用 JSON 配置文件）
-- **UI**：无需服务端框架（Python 内置 http.server）
+- **可选**：`pyyaml`（未安装时自动用 JSON）
+- **UI**：无外部框架（Python 内置 http.server）
 
-## License
+## 许可证
 
 MIT
