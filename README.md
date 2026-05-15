@@ -31,14 +31,53 @@
 
 ## 快速开始
 
-### 1. 启动（一个命令启动所有）
+### 一键安装
+
+macOS / Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SusuAgent/agent-bridge/main/install.sh | bash
+```
+
+Windows (PowerShell):
+
+```powershell
+powershell -c "irm https://raw.githubusercontent.com/SusuAgent/agent-bridge/main/install.ps1 | iex"
+```
+
+### 初始化
+
+```bash
+bridge setup
+```
+
+交互式向导引导你配置：共享目录 → Agent 信息 → Webhook → 开机自启。完成后即可使用。
+
+### 常用命令
+
+```bash
+bridge start          # 启动 UI 服务 → http://127.0.0.1:7899
+bridge start --open   # 启动并打开浏览器
+bridge status         # 查看运行状态和配置摘要
+bridge send "你好！"   # 发送消息
+bridge open           # 打开浏览器
+bridge config         # 查看当前配置
+bridge stop           # 停止 UI 服务
+bridge restart        # 重启服务
+```
+
+### 手动安装（开发者）
 
 ```bash
 git clone https://github.com/SusuAgent/agent-bridge.git
 cd agent-bridge
 
+# 直接用 CLI
+python3 cli/bridge setup
+python3 cli/bridge start --open
+
+# 或直接启动 server
 python3 ui/server.py --open
-# → http://127.0.0.1:7899
 ```
 
 服务器会自动：
@@ -47,7 +86,7 @@ python3 ui/server.py --open
 - 有消息时通过 webhook 唤醒对方
 - 超过 60 条或空闲 30 分钟时自动归档
 
-### 2. 在页面中配置
+### 在页面中配置
 
 点击顶部 Agent Badge（彩色圆点）编辑身份：
 
@@ -60,30 +99,22 @@ python3 ui/server.py --open
 页脚显示轮询状态：绿点运行中，灰点已暂停。
 单击 ▶/∥ 按钮暂停/恢复轮询，双击 ▶ 立即触发一次轮询。
 
-### 3. 发消息
-
-```bash
-python3 core/send.py --bridge bridge.yaml --agent alice "你好！"
-
-# 或设置环境变量后省略参数
-export AGENT_ID=alice
-python3 core/send.py "你好！"
-```
-
-对方收到消息后，会通过 webhook 被唤醒，处理并回复。
-
 ---
 
 ## 项目结构
 
 ```
 agent-bridge/
+├── cli/
+│   └── bridge               # CLI 命令行工具
 ├── core/
 │   ├── send.py               # 消息发送
 │   └── poll.py               # 轮询 + 自动归档
 ├── ui/
-│   ├── index.html            # 聊天时间线
-│   └── server.py             # API + 配置管理
+│   ├── index.html            # 聊天时间线 + 设置页
+│   └── server.py             # API + 配置管理 + 轮询
+├── install.sh                # 一键安装 (macOS/Linux)
+├── install.ps1               # 一键安装 (Windows)
 ├── setup/
 │   ├── macos.sh              # macOS launchd 部署
 │   └── linux.sh              # Linux systemd/cron 部署
@@ -95,6 +126,7 @@ agent-bridge/
 │   ├── ARCHITECTURE.md
 │   ├── SETUP.md
 │   └── CUSTOMIZE.md
+├── tests/                    # 单元测试 (73 tests)
 ├── README.md
 └── LICENSE
 ```

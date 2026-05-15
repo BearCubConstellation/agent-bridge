@@ -1,0 +1,624 @@
+#!/usr/bin/env python3
+"""
+Agent Bridge — 命令行工具
+
+用法:
+    bridge setup          # 交互式配置向导
+    bridge start          # 启动 UI 服务
+    bridge stop           # 停止 UI 服务
+    bridge restart        # 重启 UI 服务
+    bridge status         # 查看运行状态
+    bridge send "消息"     # 发送消息
+    bridge open           # 打开浏览器
+    bridge config         # 查看当前配置
+    bridge version        # 查看版本
+"""
+import argparse
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import webbrowser
+from datetime import datetime
+from pathlib import Path
+
+VERSION = "1.0.0"
+
+# 项目根目录（cli/bridge 的上级）
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CORE_DIR = PROJECT_ROOT / "core"
+UI_DIR = PROJECT_ROOT / "ui"
+
+# 默认路径
+DEFAULT_SHARED_DIR = Path.home() / ".agent-bridge"
+DEFAULT_CONFIG = DEFAULT_SHARED_DIR / "bridge.yaml"
+PID_FILE = DEFAULT_SHARED_DIR / ".server.pid"
+LOG_FILE = DEFAULT_SHARED_DIR / ".server.log"
+
+# 将 core/ 加入 import 路径
+sys.path.insert(0, str(CORE_DIR))
+
+
+# ═══ 工具函数 ═══
+
+def _load_config():
+    """读取 bridge.yaml，返回 dict。"""
+    config_path = _find_config()
+    if not config_path or not config_path.exists():
+        return {}
+    try:
+        import yaml
+        with open(config_path) as f:
+            return yaml.safe_load(f) or {}
+    except (ImportError, Exception):
+        try:
+            with open(config_path) as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+
+def _find_config():
+    """按优先级查找配置文件。"""
+    candidates = [
+        DEFAULT_CONFIG,
+        Path.home() / ".shared-chat" / "bridge.yaml",
+    ]
+    # 环境变量覆盖
+    env_cfg = os.environ.get("BRIDGE_CONFIG")
+    if env_cfg:
+        candidates.insert(0, Path(env_cfg))
+    for p in candidates:
+        if p.exists():
+            return p
+    return DEFAULT_CONFIG
+
+
+def _shared_dir():
+    cfg = _load_config()
+    d = cfg.get("shared_dir", "")
+    if d:
+        return Path(os.path.expanduser(d))
+    return DEFAULT_SHARED_DIR
+
+
+def _is_portable():
+    """是否以可移植模式运行（安装在 ~/.agent-bridge/src/）。"""
+    return str(PROJECT_ROOT).startswith(str(Path.home() / ".agent-bridge"))
+
+
+def _server_cmd():
+    """构建 server 启动命令。"""
+    return [
+        sys.executable,
+        str(UI_DIR / "server.py"),
+        "--dir", str(_shared_dir()),
+    ]
+
+
+def _read_pid():
+    if PID_FILE.exists():
+        try:
+            return int(PID_FILE.read_text().strip())
+        except (ValueError, OSError):
+            pass
+    return None
+
+
+def _is_running():
+    pid = _read_pid()
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        # PID 文件过期，清理
+        PID_FILE.unlink(missing_ok=True)
+        return False
+
+
+def _print_ok(msg):
+    print(f"  \033[32m✓\033[0m {msg}")
+
+
+def _print_err(msg):
+    print(f"  \033[31m✗\033[0m {msg}")
+
+
+def _print_info(msg):
+    print(f"  \033[36m→\033[0m {msg}")
+
+
+def _ask(prompt, default=""):
+    hint = f" [{default}]" if default else ""
+    val = input(f"  {prompt}{hint}: ").strip()
+    return val if val else default
+
+
+def _ask_yn(prompt, default=True):
+    hint = "Y/n" if default else "y/N"
+    val = input(f"  {prompt} [{hint}]: ").strip().lower()
+    if not val:
+        return default
+    return val in ("y", "yes", "是")
+
+
+def _ask_choice(prompt, choices, default=0):
+    """选择列表中的一个选项，返回索引。"""
+    for i, c in enumerate(choices):
+        marker = " →" if i == default else "  "
+        print(f"{marker} {i + 1}. {c}")
+    val = input(f"  {prompt} [{default + 1}]: ").strip()
+    if not val:
+        return default
+    try:
+        idx = int(val) - 1
+        if 0 <= idx < len(choices):
+            return idx
+    except ValueError:
+        pass
+    return default
+
+
+def _write_config(config, path=None):
+    """写入配置文件。"""
+    path = path or _find_config()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import yaml
+        with open(path, "w") as f:
+            yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    except ImportError:
+        with open(path, "w") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    return path
+
+
+# ═══ 子命令 ═══
+
+def cmd_setup(args):
+    """交互式配置向导。"""
+    print()
+    print("  \033[1mAgent Bridge 配置向导\033[0m")
+    print("  " + "─" * 36)
+    print()
+
+    config = _load_config()
+    shared = config.get("shared_dir", "")
+
+    # 1. 共享目录
+    print("  \033[1m[1/4] 共享目录\033[0m")
+    print("  消息文件存放的目录，两台机器共享时需确保路径一致。")
+    current_dir = shared or str(DEFAULT_SHARED_DIR)
+    shared = _ask("共享目录路径", current_dir)
+    shared_path = Path(os.path.expanduser(shared))
+    shared_path.mkdir(parents=True, exist_ok=True)
+    config["shared_dir"] = str(shared_path)
+    _print_ok(f"目录就绪: {shared_path}")
+    print()
+
+    # 2. Agent 配置
+    print("  \033[1m[2/4] Agent 配置\033[0m")
+    print("  配置参与对话的 Agent（至少 2 个）。")
+    existing_agents = config.get("agents", {})
+    if not isinstance(existing_agents, dict):
+        existing_agents = {}
+
+    agents = {}
+    default_colors = ["#ff6b6b", "#4ecdc4", "#ffd93d", "#a29bfe", "#fd79a8", "#00cec9"]
+
+    if existing_agents:
+        print("  已有 Agent 配置：")
+        for aid, a in existing_agents.items():
+            print(f"    - {a.get('display_name', aid)} (ID: {aid})")
+        if _ask_yn("保留已有配置？", default=True):
+            agents = dict(existing_agents)
+
+    if not agents:
+        # 引导创建两个 agent
+        for i in range(2):
+            print(f"\n  \033[1m--- Agent {i + 1} ---\033[0m")
+            aid = ""
+            while not aid or not re.match(r'^[a-zA-Z0-9_-]+$', aid):
+                aid = _ask(f"Agent ID（字母/数字/下划线/连字符）",
+                           ["momo", "susu"][i] if i < 2 else "")
+                if not re.match(r'^[a-zA-Z0-9_-]+$', aid):
+                    _print_err("ID 只能包含字母、数字、下划线、连字符")
+
+            name = _ask("显示名称", aid.capitalize())
+            color = default_colors[i % len(default_colors)]
+            filter_from = _ask("只接收来自谁的来信（对方 Agent ID，留空接收全部）", "")
+
+            print("  Webhook URL（对方收到消息后的唤醒地址，留空暂不配置）")
+            print("  示例: http://127.0.0.1:8644/webhooks/reply")
+            wu_url = _ask("Webhook URL", "")
+
+            agents[aid] = {
+                "id": aid,
+                "display_name": name,
+                "color": color,
+                "cursor": "line",
+                "filter_from": filter_from,
+                "wakeup": {
+                    "url": wu_url,
+                    "method": "POST",
+                    "headers": {"Content-Type": "application/json"},
+                    "body_template": {"message": "{{message}}"},
+                },
+            }
+            _print_ok(f"Agent '{name}' 已配置")
+
+    config["agents"] = agents
+
+    # 3. 本机角色
+    print()
+    print("  \033[1m[3/4] 本机角色\033[0m")
+    agent_ids = list(agents.keys())
+    if len(agent_ids) > 1:
+        print("  选择本机代表哪个 Agent 运行轮询：")
+        idx = _ask_choice("选择 Agent",
+                          [f"{agents[a].get('display_name', a)} ({a})" for a in agent_ids])
+        config["agent_id"] = agent_ids[idx]
+    elif len(agent_ids) == 1:
+        config["agent_id"] = agent_ids[0]
+    else:
+        config["agent_id"] = ""
+    print()
+
+    # 4. 开机自启
+    print("  \033[1m[4/4] 开机自启\033[0m")
+    auto_start = False
+    if sys.platform == "darwin":
+        auto_start = _ask_yn("是否配置 launchd 开机自动启动轮询？", default=False)
+    elif sys.platform.startswith("linux"):
+        auto_start = _ask_yn("是否配置 systemd timer 自动轮询？", default=False)
+
+    # 保存配置
+    config_path = shared_path / "bridge.yaml"
+    _write_config(config, config_path)
+    _print_ok(f"配置已保存: {config_path}")
+    print()
+
+    # 安装自启服务
+    if auto_start:
+        _install_service(config)
+
+    # 完成
+    print("  " + "─" * 36)
+    _print_ok("配置完成！")
+    print()
+    print(f"  启动 UI:  \033[36mbridge start\033[0m")
+    print(f"  发送消息: \033[36mbridge send \"你好\"\033[0m")
+    print(f"  查看状态: \033[36mbridge status\033[0m")
+    print()
+
+
+def _install_service(config):
+    """安装系统自启服务。"""
+    shared_dir = Path(os.path.expanduser(config.get("shared_dir", "")))
+    my_id = config.get("agent_id", "")
+    if not my_id:
+        _print_err("未设置 agent_id，跳过服务安装")
+        return
+
+    if sys.platform == "darwin":
+        _install_launchd(shared_dir, my_id)
+    elif sys.platform.startswith("linux"):
+        _install_systemd(shared_dir, my_id)
+
+
+def _install_launchd(shared_dir, agent_id):
+    """安装 macOS launchd plist。"""
+    label = "com.agent-bridge.poll"
+    plist_dir = Path.home() / "Library" / "LaunchAgents"
+    plist_dir.mkdir(parents=True, exist_ok=True)
+    plist_path = plist_dir / f"{label}.plist"
+
+    poll_script = PROJECT_ROOT / "core" / "poll.py"
+    config_path = shared_dir / "bridge.yaml"
+
+    plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>{label}</string>
+    <key>ProgramArguments</key><array>
+        <string>{sys.executable}</string>
+        <string>{poll_script}</string>
+        <string>--config</string><string>{config_path}</string>
+        <string>--agent</string><string>{agent_id}</string>
+    </array>
+    <key>StartInterval</key><integer>180</integer>
+    <key>RunAtLoad</key><true/>
+    <key>StandardOutPath</key><string>{shared_dir}/.poll.log</string>
+    <key>StandardErrorPath</key><string>{shared_dir}/.poll-err.log</string>
+</dict>
+</plist>"""
+
+    plist_path.write_text(plist_content)
+    subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
+    subprocess.run(["launchctl", "load", str(plist_path)], capture_output=True)
+    _print_ok(f"launchd 服务已安装: {plist_path.name}")
+
+
+def _install_systemd(shared_dir, agent_id):
+    """安装 Linux systemd user service。"""
+    service_name = "agent-bridge-poll"
+    service_dir = Path.home() / ".config" / "systemd" / "user"
+    service_dir.mkdir(parents=True, exist_ok=True)
+    service_path = service_dir / f"{service_name}.service"
+    timer_path = service_dir / f"{service_name}.timer"
+
+    poll_script = PROJECT_ROOT / "core" / "poll.py"
+    config_path = shared_dir / "bridge.yaml"
+
+    service_content = f"""[Unit]
+Description=Agent Bridge Poll
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart={sys.executable} {poll_script} --config {config_path} --agent {agent_id}
+"""
+
+    timer_content = f"""[Unit]
+Description=Agent Bridge Poll Timer
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=3min
+
+[Install]
+WantedBy=timers.target
+"""
+
+    service_path.write_text(service_content)
+    timer_path.write_text(timer_content)
+    subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+    subprocess.run(["systemctl", "--user", "enable", f"{service_name}.timer"], capture_output=True)
+    subprocess.run(["systemctl", "--user", "start", f"{service_name}.timer"], capture_output=True)
+    _print_ok(f"systemd timer 已安装: {service_name}.timer")
+
+
+def cmd_start(args):
+    """启动 UI 服务。"""
+    if _is_running():
+        pid = _read_pid()
+        _print_info(f"服务已在运行 (PID {pid})")
+        return
+
+    shared_dir = _shared_dir()
+    shared_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = _server_cmd()
+    port = args.port or 7899
+    cmd.extend(["--port", str(port)])
+    if args.host:
+        cmd.extend(["--host", args.host])
+
+    log_f = open(LOG_FILE, "a")
+    proc = subprocess.Popen(cmd, stdout=log_f, stderr=log_f, start_new_session=True)
+
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PID_FILE.write_text(str(proc.pid))
+
+    _print_ok(f"服务已启动 (PID {proc.pid})")
+    _print_info(f"地址: http://127.0.0.1:{port}")
+
+    if args.open:
+        import time
+        time.sleep(1)
+        webbrowser.open(f"http://127.0.0.1:{port}")
+
+
+def cmd_stop(args):
+    """停止 UI 服务。"""
+    pid = _read_pid()
+    if not pid:
+        _print_info("服务未在运行")
+        return
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+        _print_ok(f"已发送停止信号 (PID {pid})")
+    except ProcessLookupError:
+        _print_info("进程已不存在")
+    except PermissionError:
+        _print_err("无权限停止进程，请手动 kill")
+    finally:
+        PID_FILE.unlink(missing_ok=True)
+
+
+def cmd_restart(args):
+    """重启服务。"""
+    cmd_stop(args)
+    cmd_start(args)
+
+
+def cmd_status(args):
+    """查看运行状态和配置摘要。"""
+    print()
+    print(f"  \033[1mAgent Bridge v{VERSION}\033[0m")
+    print(f"  项目目录: {PROJECT_ROOT}")
+    print(f"  配置文件: {_find_config()}")
+    print()
+
+    config = _load_config()
+    shared = config.get("shared_dir", "—")
+    agent_id = config.get("agent_id", "—")
+    agents = config.get("agents", {})
+
+    print(f"  共享目录: {shared}")
+    print(f"  本机角色: {agent_id}")
+    print()
+
+    if agents:
+        print("  Agents:")
+        for aid, a in agents.items():
+            name = a.get("display_name", aid)
+            color = a.get("color", "—")
+            wu = a.get("wakeup", {})
+            url = wu.get("url", "—")
+            marker = " ← 本机" if aid == agent_id else ""
+            print(f"    • {name} (ID: {aid}){marker}")
+            print(f"      颜色: {color}  游标: {a.get('cursor', 'line')}  来自: {a.get('filter_from', '—')}")
+            print(f"      Webhook: {url}")
+    print()
+
+    # 服务状态
+    if _is_running():
+        pid = _read_pid()
+        _print_ok(f"UI 服务运行中 (PID {pid})")
+    else:
+        _print_info("UI 服务未运行")
+
+    # 文件状态
+    shared_path = _shared_dir()
+    active = shared_path / "active.jsonl"
+    history = shared_path / "history"
+    if active.exists():
+        with open(active) as f:
+            count = sum(1 for line in f if line.strip())
+        print(f"  当前消息: {count} 条")
+    else:
+        print(f"  当前消息: 无")
+    if history.exists():
+        archives = list(history.glob("*.jsonl"))
+        print(f"  归档文件: {len(archives)} 个")
+    print()
+
+
+def cmd_send(args):
+    """发送消息。"""
+    from send import send as _send, validate_agent_id, find_active_jsonl
+
+    config = _load_config()
+    agent_id = args.agent or config.get("agent_id", "")
+    shared_dir = config.get("shared_dir", "")
+
+    if not agent_id:
+        agents = config.get("agents", {})
+        if len(agents) == 1:
+            agent_id = next(iter(agents.keys()))
+        elif len(agents) > 1:
+            _print_err("配置了多个 Agent，请用 --agent 指定")
+            print(f"  可选: {', '.join(agents.keys())}")
+            sys.exit(1)
+        else:
+            _print_err("未找到 Agent 配置，请先运行 bridge setup")
+            sys.exit(1)
+
+    if not validate_agent_id(agent_id):
+        _print_err(f"无效的 Agent ID: {agent_id}")
+        sys.exit(1)
+
+    text = args.message
+    if not text:
+        text = sys.stdin.read().strip()
+    if not text:
+        _print_err("消息内容不能为空")
+        sys.exit(1)
+
+    active_file = find_active_jsonl(shared_dir)
+    _send(agent_id, active_file, text)
+
+
+def cmd_open(args):
+    """打开浏览器。"""
+    port = args.port or 7899
+    url = f"http://127.0.0.1:{port}"
+    if _is_running():
+        webbrowser.open(url)
+        _print_ok(f"已打开 {url}")
+    else:
+        _print_err("服务未运行，请先 bridge start")
+        sys.exit(1)
+
+
+def cmd_config(args):
+    """查看当前配置。"""
+    config_path = _find_config()
+    if not config_path.exists():
+        _print_err(f"配置文件不存在: {config_path}")
+        _print_info("请先运行 bridge setup")
+        return
+
+    print(f"  配置文件: {config_path}")
+    print()
+    try:
+        print(config_path.read_text())
+    except Exception as e:
+        _print_err(f"读取失败: {e}")
+
+
+def cmd_version(args):
+    print(f"  Agent Bridge v{VERSION}")
+
+
+# ═══ 主入口 ═══
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="bridge",
+        description="Agent Bridge — Agent 间异步通信中间件",
+    )
+    sub = parser.add_subparsers(dest="command", help="可用命令")
+
+    # setup
+    p = sub.add_parser("setup", help="交互式配置向导")
+
+    # start
+    p = sub.add_parser("start", help="启动 UI 服务")
+    p.add_argument("--port", "-p", type=int, help="端口 (默认 7899)")
+    p.add_argument("--host", help="绑定地址 (默认 127.0.0.1)")
+    p.add_argument("--open", "-o", action="store_true", help="启动后打开浏览器")
+
+    # stop
+    p = sub.add_parser("stop", help="停止 UI 服务")
+
+    # restart
+    p = sub.add_parser("restart", help="重启 UI 服务")
+
+    # status
+    p = sub.add_parser("status", help="查看运行状态")
+
+    # send
+    p = sub.add_parser("send", help="发送消息")
+    p.add_argument("message", nargs="?", help="消息内容（也可通过管道输入）")
+    p.add_argument("--agent", "-a", help="指定发送者 Agent ID")
+
+    # open
+    p = sub.add_parser("open", help="打开浏览器")
+    p.add_argument("--port", type=int, help="端口 (默认 7899)")
+
+    # config
+    p = sub.add_parser("config", help="查看当前配置")
+
+    # version
+    p = sub.add_parser("version", help="查看版本")
+
+    args = parser.parse_args()
+
+    commands = {
+        "setup": cmd_setup,
+        "start": cmd_start,
+        "stop": cmd_stop,
+        "restart": cmd_restart,
+        "status": cmd_status,
+        "send": cmd_send,
+        "open": cmd_open,
+        "config": cmd_config,
+        "version": cmd_version,
+    }
+
+    if args.command in commands:
+        commands[args.command](args)
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
