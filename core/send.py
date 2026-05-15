@@ -19,52 +19,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Cross-platform file locking helpers
-# ---------------------------------------------------------------------------
-import platform
-
-_IS_WINDOWS = platform.system() == "Windows"
-
-if _IS_WINDOWS:
-    # Windows: use msvcrt.locking (available on CPython for Windows)
-    import msvcrt
-
-    def lock_file(f):
-        """Acquire an exclusive lock on *f* (Windows)."""
-        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
-        f.seek(0, 2)  # seek to end so append position is correct after lock
-
-    def unlock_file(f):
-        """Release the lock on *f* (Windows)."""
-        try:
-            f.seek(0)
-            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-        except OSError:
-            pass
-else:
-    # Unix: use fcntl.flock (stdlib on all Unix-like systems)
-    try:
-        import fcntl as _fcntl
-
-        def lock_file(f):
-            """Acquire an exclusive lock on *f* (Unix)."""
-            _fcntl.flock(f.fileno(), _fcntl.LOCK_EX)
-
-        def unlock_file(f):
-            """Release the lock on *f* (Unix)."""
-            try:
-                _fcntl.flock(f.fileno(), _fcntl.LOCK_UN)
-            except OSError:
-                pass
-    except ImportError:
-        # Extremely unlikely on Unix, but fall back gracefully
-        def lock_file(f):
-            pass
-
-        def unlock_file(f):
-            pass
-
+from lock import lock_file, unlock_file
 
 DEFAULT_BRIDGE_CANDIDATES = [
     Path.home() / ".agent-bridge" / "bridge.yaml",
@@ -81,17 +36,19 @@ def load_bridge_config(config_path=None):
 
     for p in paths:
         if p.exists():
+            # 先尝试 yaml，失败再尝试 json
             try:
                 import yaml
                 with open(p) as f:
                     return yaml.safe_load(f) or {}
-            except (ImportError, yaml.YAMLError):
-                import json as _json
-                try:
-                    with open(p) as f:
-                        return _json.load(f)
-                except (json.JSONDecodeError, Exception):
-                    continue
+            except ImportError:
+                pass
+            except Exception:
+                pass
+            # yaml 不可用或解析失败，尝试 json fallback
+            try:
+                with open(p) as f:
+                    return json.load(f)
             except Exception:
                 continue
     return {}

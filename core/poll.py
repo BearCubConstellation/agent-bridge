@@ -24,52 +24,7 @@ import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Cross-platform file locking helpers (same pattern as send.py)
-# ---------------------------------------------------------------------------
-import ctypes
-import ctypes.wintypes
-import platform
-
-_IS_WINDOWS = platform.system() == "Windows"
-
-if _IS_WINDOWS:
-    import msvcrt
-
-    def lock_file(f):
-        """Acquire an exclusive lock on *f* (Windows)."""
-        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
-        f.seek(0, 2)  # seek to end so append position is correct after lock
-
-    def unlock_file(f):
-        """Release the lock on *f* (Windows)."""
-        try:
-            f.seek(0)
-            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-        except OSError:
-            pass
-else:
-    try:
-        import fcntl as _fcntl
-
-        def lock_file(f):
-            """Acquire an exclusive lock on *f* (Unix)."""
-            _fcntl.flock(f.fileno(), _fcntl.LOCK_EX)
-
-        def unlock_file(f):
-            """Release the lock on *f* (Unix)."""
-            try:
-                _fcntl.flock(f.fileno(), _fcntl.LOCK_UN)
-            except OSError:
-                pass
-    except ImportError:
-
-        def lock_file(f):
-            pass
-
-        def unlock_file(f):
-            pass
-
+from lock import lock_file, unlock_file
 
 ARCHIVE_MSG_LIMIT = 60
 ARCHIVE_IDLE_MINUTES = 30
@@ -78,15 +33,23 @@ ARCHIVE_IDLE_MINUTES = 30
 # ─── 配置 ─────────────────────────────────────────────
 
 def load_config(config_path):
+    # 先尝试 yaml，失败再尝试 json
     try:
-        try:
-            import yaml
-            with open(config_path) as f:
-                return yaml.safe_load(f) or {}
-        except ImportError:
-            import json as _json
-            with open(config_path) as f:
-                return _json.load(f)
+        import yaml
+        with open(config_path) as f:
+            return yaml.safe_load(f) or {}
+    except ImportError:
+        pass
+    except (FileNotFoundError, PermissionError):
+        print(f"ERROR: config file not found: {config_path}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"ERROR: invalid config: {e}", file=sys.stderr)
+        sys.exit(1)
+    # json fallback
+    try:
+        with open(config_path) as f:
+            return json.load(f)
     except (FileNotFoundError, PermissionError):
         print(f"ERROR: config file not found: {config_path}", file=sys.stderr)
         sys.exit(1)

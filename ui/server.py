@@ -11,7 +11,6 @@ Agent Bridge — 本地 UI 服务
     python3 server.py --poll-interval 60       # 每 60 秒轮询一次
 """
 import argparse
-import fcntl
 import http.server
 import json
 import os
@@ -24,33 +23,15 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
-# 从 poll.py 导入核心轮询逻辑
+# 从 core/ 导入
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
+from lock import file_lock
 from poll import run_poll, load_config as load_poll_config
 
 
 BRIDGE_FILENAME = "bridge.yaml"
 VALID_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
 DEFAULT_POLL_INTERVAL = 180  # 秒
-
-
-def _file_lock(lock_path):
-    """Acquire an exclusive file lock (context manager). Usage: with _file_lock(path): ..."""
-    import contextlib
-
-    @contextlib.contextmanager
-    def _lock():
-        fd = None
-        try:
-            fd = open(lock_path, "w")
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            yield fd
-        finally:
-            if fd is not None:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-                fd.close()
-
-    return _lock()
 
 
 # ─── 配置 ─────────────────────────────────────────────
@@ -96,15 +77,20 @@ def default_agents(shared_dir):
 def read_bridge(shared_dir):
     config_path = Path(shared_dir) / BRIDGE_FILENAME
     if config_path.exists():
+        # 先尝试 yaml，失败再尝试 json
         try:
             import yaml
             with open(config_path) as f:
                 cfg = yaml.safe_load(f) or {}
-        except (ImportError, yaml.YAMLError):
-            import json as _json
+        except ImportError:
+            pass
+        except Exception:
+            pass
+        # json fallback (仅在 yaml 不可用或失败时)
+        if 'cfg' not in dir():
             try:
                 with open(config_path) as f:
-                    cfg = _json.load(f)
+                    cfg = json.load(f)
             except Exception:
                 cfg = {}
     else:
@@ -409,51 +395,57 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         if body.get("agent_id"):
             cfg["agent_id"] = body["agent_id"]
 
-        # Agents
-        new_agents_list = body.get("agents", [])
-        if new_agents_list:
-            errors = [f"invalid ID: '{a.get('id', '')}'"
-                      for a in new_agents_list
-                      if not validate_agent_id(a.get("id", "").strip())]
-            if errors:
-                self.send_json({"ok": False, "error": "; ".join(errors)})
-                return
+        # Agents — 支持传入空列表来清空
+        if "agents" in body:
+            new_agents_list = body["agents"]
+            if new_agents_list:
+                errors = [f"invalid ID: '{a.get('id', '')}'"
+                          for a in new_agents_list
+                          if not validate_agent_id(a.get("id", "").strip())]
+                if errors:
+                    self.send_json({"ok": False, "error": "; ".join(errors)})
+                    return
 
-            agents_dict = {}
-            for a in new_agents_list:
-                aid = a["id"].strip()
-                entry = {
-                    "id": aid,
-                    "display_name": a.get("display_name", aid).strip() or aid,
-                    "color": a.get("color", "#8888a0").strip(),
-                    "cursor": a.get("cursor", "line"),
-                    "filter_from": a.get("filter_from", ""),
-                }
-                # Wakeup
-                wu = a.get("wakeup", {})
-                wakeup = {
-                    "url": wu.get("url", ""),
-                    "method": wu.get("method", "POST"),
-                    "headers": wu.get("headers", {"Content-Type": "application/json"}),
-                    "body_template": wu.get("body_template", {"message": "{{message}}"}),
-                }
-                # Auth (optional)
-                auth = wu.get("auth")
-                if auth and auth.get("type") == "bearer" and auth.get("token_path"):
-                    wakeup["auth"] = {
-                        "type": "bearer",
-                        "token_path": auth["token_path"],
-                        "token_jsonpath": auth.get("token_jsonpath", ""),
+                agents_dict = {}
+                for a in new_agents_list:
+                    aid = a["id"].strip()
+                    entry = {
+                        "id": aid,
+                        "display_name": a.get("display_name", aid).strip() or aid,
+                        "color": a.get("color", "#8888a0").strip(),
+                        "cursor": a.get("cursor", "line"),
+                        "filter_from": a.get("filter_from", ""),
                     }
-                entry["wakeup"] = wakeup
-                agents_dict[aid] = entry
+                    # Wakeup
+                    wu = a.get("wakeup", {})
+                    wakeup = {
+                        "url": wu.get("url", ""),
+                        "method": wu.get("method", "POST"),
+                        "headers": wu.get("headers", {"Content-Type": "application/json"}),
+                        "body_template": wu.get("body_template", {"message": "{{message}}"}),
+                    }
+                    # Auth (optional)
+                    auth = wu.get("auth")
+                    if auth and auth.get("type") == "bearer" and auth.get("token_path"):
+                        wakeup["auth"] = {
+                            "type": "bearer",
+                            "token_path": auth["token_path"],
+                            "token_jsonpath": auth.get("token_jsonpath", ""),
+                        }
+                    entry["wakeup"] = wakeup
+                    agents_dict[aid] = entry
 
-            cfg["agents"] = agents_dict
+                cfg["agents"] = agents_dict
+                saved_agents = list(agents_dict.keys())
+            else:
+                # 传入空列表：清空 agents
+                cfg["agents"] = {}
+                saved_agents = []
 
         write_bridge(config_path, cfg)
-        saved_agents = list(agents_dict.keys()) if new_agents_list else []
+        saved_agents_out = saved_agents if "agents" in body else []
         self.send_json({"ok": True,
-                        "saved_agents": saved_agents,
+                        "saved_agents": saved_agents_out,
                         "message": "配置已保存"})
 
     # ─── POST /api/archive ─────────────────────────
@@ -473,7 +465,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         now = datetime.now().strftime("%Y-%m-%d_%H%M")
         name = f"{now}.jsonl"
         try:
-            with _file_lock(shared / ".archive.lock"):
+            with file_lock(shared / ".archive.lock"):
                 shutil.move(str(active), str(history / name))
             self.send_json({"ok": True, "archived_to": name, "message_count": len(msgs)})
         except OSError as e:
@@ -540,8 +532,14 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json({"ok": False, "error": "agent_id and text required"})
             return
 
-        # Import send logic inline
+        # 验证 agent_id 是否在配置中定义
         shared = Path(self.shared_dir)
+        cfg, _ = read_bridge(shared)
+        known_agents = cfg.get("agents", {})
+        if agent_id not in known_agents:
+            self.send_json({"ok": False, "error": f"unknown agent_id: '{agent_id}'"})
+            return
+
         active = shared / "active.jsonl"
         active.parent.mkdir(parents=True, exist_ok=True)
         msg = {
@@ -549,7 +547,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "from": agent_id,
             "msg": text,
         }
-        with _file_lock(shared / ".active.lock"):
+        with file_lock(shared / ".active.lock"):
             with open(active, "a") as f:
                 f.write(json.dumps(msg, ensure_ascii=False) + "\n")
 
@@ -637,8 +635,12 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         if not filename.endswith(".jsonl"):
             self.send_error(400, "Only .jsonl files")
             return
+        # 防止路径遍历
         shared = Path(self.shared_dir)
-        filepath = shared / "history" / filename
+        filepath = (shared / "history" / filename).resolve()
+        if not str(filepath).startswith(str((shared / "history").resolve())):
+            self.send_error(403)
+            return
         if not filepath.exists():
             self.send_error(404)
             return
@@ -652,7 +654,8 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        # 仅允许 localhost 来源（绑定 127.0.0.1 已限制网络层）
+        self.send_header("Access-Control-Allow-Origin", "http://127.0.0.1:*")
         self.end_headers()
         self.wfile.write(text.encode("utf-8"))
 

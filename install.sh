@@ -90,8 +90,15 @@ EOF
         *)
             info "$BIN_DIR 不在 PATH 中"
             SHELL_RC=""
-            if [ -f "$HOME/.bashrc" ]; then SHELL_RC="$HOME/.bashrc"
-            elif [ -f "$HOME/.zshrc" ]; then SHELL_RC="$HOME/.zshrc"
+            # 优先检查当前 shell 的 rc 文件
+            if [ -n "$ZSH_VERSION" ] && [ -f "$HOME/.zshrc" ]; then
+                SHELL_RC="$HOME/.zshrc"
+            elif [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then
+                SHELL_RC="$HOME/.bashrc"
+            elif [ -f "$HOME/.zshrc" ]; then
+                SHELL_RC="$HOME/.zshrc"
+            elif [ -f "$HOME/.bashrc" ]; then
+                SHELL_RC="$HOME/.bashrc"
             fi
             if [ -n "$SHELL_RC" ]; then
                 echo "" >> "$SHELL_RC"

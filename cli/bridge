@@ -16,12 +16,11 @@ Agent Bridge — 命令行工具
 import argparse
 import json
 import os
+import platform
 import re
-import signal
 import subprocess
 import sys
 import webbrowser
-from datetime import datetime
 from pathlib import Path
 
 VERSION = "1.0.0"
@@ -82,11 +81,6 @@ def _shared_dir():
     if d:
         return Path(os.path.expanduser(d))
     return DEFAULT_SHARED_DIR
-
-
-def _is_portable():
-    """是否以可移植模式运行（安装在 ~/.agent-bridge/src/）。"""
-    return str(PROJECT_ROOT).startswith(str(Path.home() / ".agent-bridge"))
 
 
 def _server_cmd():
@@ -422,7 +416,13 @@ def cmd_stop(args):
         return
 
     try:
-        os.kill(pid, signal.SIGTERM)
+        if platform.system() == "Windows":
+            # Windows: os.kill with SIGTERM doesn't work reliably
+            subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                           capture_output=True, check=False)
+        else:
+            import signal
+            os.kill(pid, signal.SIGTERM)
         _print_ok(f"已发送停止信号 (PID {pid})")
     except ProcessLookupError:
         _print_info("进程已不存在")
