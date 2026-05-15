@@ -1275,14 +1275,39 @@ async function loadStatus() {
 }
 
 // ═══ Init ═══
-async function init() {
-  await loadConfig();
-  await loadArchives();
-  await refreshAll();
-  startAutoRefresh();
-  loadPollStatus();
+function checkProtocol() {
+  if (location.protocol === 'file:') {
+    document.body.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#1a1a2e;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,sans-serif">
+        <div style="text-align:center;max-width:480px;padding:32px">
+          <div style="font-size:3em;margin-bottom:16px">⚠️</div>
+          <h2 style="font-size:1.3em;font-weight:600;margin:0 0 12px">不能直接打开 HTML 文件</h2>
+          <p style="color:#8888a0;line-height:1.6;margin:0 0 20px">
+            此页面需要后端 API 支持。<br>
+            请通过 server.py 启动后访问：
+          </p>
+          <code style="display:block;background:#0f0f23;padding:12px 16px;border-radius:8px;font-family:monospace;font-size:0.85em;color:#4ecdc4;text-align:left">
+            cd ~/Documents/Project/agent-bridge<br>
+            python3 ui/server.py --dir ~/.shared-chat
+          </code>
+          <p style="color:#8888a0;line-height:1.6;margin:16px 0 0;font-size:0.85em">
+            然后浏览器打开 <a href="http://127.0.0.1:7899" style="color:#4ecdc4">http://127.0.0.1:7899</a>
+          </p>
+        </div>
+      </div>`;
+    return false;
+  }
+  return true;
 }
-init();
+if (checkProtocol()) {
+  (async function init() {
+    await loadConfig();
+    await loadArchives();
+    await refreshAll();
+    startAutoRefresh();
+    loadPollStatus();
+  })();
+}
 </script>
 </body>
 </html>
