@@ -314,7 +314,150 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
+/* ═══ Settings form ═══ */
+.settings-panel { max-width: 760px; margin: 0 auto; }
+
+.settings-section {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 16px; margin-bottom: 12px;
+}
+.settings-section-title {
+  font-size: 0.78em; color: var(--text3); text-transform: uppercase;
+  letter-spacing: 0.5px; margin-bottom: 10px; font-weight: 600;
+}
+.settings-row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+}
+.settings-row label {
+  font-size: 0.78em; color: var(--text2); min-width: 80px; flex-shrink: 0;
+}
+.settings-row input, .settings-row select {
+  flex: 1; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text);
+  padding: 6px 9px; font-size: 0.82em; font-family: var(--font-ui);
+  outline: none; transition: border-color 0.2s;
+}
+.settings-row input:focus, .settings-row select:focus { border-color: var(--accent); }
+.settings-row .color-preview {
+  width: 22px; height: 22px; border-radius: 4px; border: 1px solid var(--border);
+  flex-shrink: 0; cursor: pointer;
+}
+.settings-row .color-input { max-width: 90px; font-family: var(--font); font-size: 0.8em; }
+
+/* Agent config card */
+.agent-config {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px;
+  transition: border-color 0.2s;
+}
+.agent-config:hover { border-color: var(--text3); }
+.agent-config-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.agent-config-name {
+  font-weight: 600; font-size: 0.88em; display: flex; align-items: center; gap: 8px;
+}
+.agent-config-name .dot { width: 8px; height: 8px; border-radius: 50%; }
+.agent-config .del-btn {
+  background: none; border: 1px solid var(--border); color: var(--red);
+  padding: 3px 9px; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 0.75em; transition: all 0.15s;
+}
+.agent-config .del-btn:hover { background: rgba(255,107,107,0.1); border-color: var(--red); }
+
+.form-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px;
+}
+
+/* Wakeup section */
+.wakeup-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.wakeup-label {
+  font-size: 0.72em; color: var(--text3); text-transform: uppercase;
+  letter-spacing: 0.3px; margin-bottom: 6px;
+}
+.wakeup-field { margin-bottom: 6px; }
+.wakeup-field label {
+  display: block; font-size: 0.72em; color: var(--text3); margin-bottom: 2px;
+}
+.wakeup-field input, .wakeup-field select, .wakeup-field textarea {
+  width: 100%; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text);
+  padding: 5px 8px; font-size: 0.8em; font-family: var(--font-ui);
+  outline: none; transition: border-color 0.2s;
+}
+.wakeup-field input:focus, .wakeup-field select:focus, .wakeup-field textarea:focus {
+  border-color: var(--accent);
+}
+.wakeup-field textarea { min-height: 50px; resize: vertical; font-family: var(--font); font-size: 0.75em; }
+
+/* Header key-value rows */
+.kv-row {
+  display: flex; gap: 4px; align-items: center; margin-bottom: 3px;
+}
+.kv-row input { flex: 1; }
+.kv-del {
+  background: none; border: 1px solid transparent; color: var(--text3);
+  padding: 2px 5px; border-radius: 3px; cursor: pointer; font-size: 0.8em;
+  transition: all 0.12s;
+}
+.kv-del:hover { color: var(--red); border-color: var(--border); }
+.add-header-btn {
+  background: none; border: 1px dashed var(--border); color: var(--text3);
+  padding: 3px 10px; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 0.75em; margin-top: 3px; transition: all 0.15s;
+}
+.add-header-btn:hover { border-color: var(--text3); color: var(--text2); }
+
+/* Auth section (collapsible) */
+.auth-section { margin-top: 6px; }
+.auth-toggle {
+  background: none; border: 1px solid var(--border); color: var(--text3);
+  padding: 3px 10px; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 0.75em; transition: all 0.15s; font-family: var(--font-ui);
+}
+.auth-toggle:hover { border-color: var(--text3); color: var(--text2); }
+.auth-fields { margin-top: 6px; padding-left: 8px; border-left: 2px solid var(--border); }
+.auth-fields.hidden { display: none; }
+
+/* Global section */
+.global-section { margin-bottom: 16px; }
+
+/* Action bar */
+.settings-actions {
+  display: flex; align-items: center; gap: 8px; margin-top: 14px;
+  padding-top: 12px; border-top: 1px solid var(--border);
+}
+.save-btn {
+  background: var(--accent); border: none; color: #fff;
+  padding: 8px 20px; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 0.85em; font-family: var(--font-ui); font-weight: 500;
+  transition: opacity 0.15s;
+}
+.save-btn:hover { opacity: 0.9; }
+.save-btn:disabled { opacity: 0.4; cursor: default; }
+.add-agent-btn {
+  background: var(--surface2); border: 1px dashed var(--border); color: var(--text2);
+  padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 0.82em; font-family: var(--font-ui);
+  transition: all 0.15s;
+}
+.add-agent-btn:hover { border-color: var(--text3); color: var(--text); }
+.save-status {
+  font-size: 0.78em; margin-left: auto; min-height: 1.2em;
+}
+.save-status.ok { color: var(--green); }
+.save-status.error { color: var(--red); }
+
+/* Body template editor */
+.body-editor {
+  min-height: 60px; font-family: var(--font) !important; font-size: 0.75em !important;
+  line-height: 1.5; white-space: pre;
+}
+
 @media (max-width: 600px) {
+  .form-grid { grid-template-columns: 1fr; }
   .header { padding: 8px 12px; }
   .cards-bar { padding: 8px 12px; }
   .tab-bar { padding: 0 12px; }
@@ -387,9 +530,11 @@ body {
 
   <!-- ═══ Settings pane ═══ -->
   <div class="tab-pane" id="pane-settings">
-    <div class="settings-area">
-      <h3>bridge.yaml</h3>
-      <textarea class="yaml-editor" id="yamlEditor" spellcheck="false" readonly></textarea>
+    <div class="settings-area" id="settingsArea">
+      <div class="empty-state">
+        <div class="icon" style="font-size:2.5em;opacity:0.4">⚙</div>
+        <h3 style="color:var(--text2);font-weight:500;margin-top:8px;font-size:1em">加载设置…</h3>
+      </div>
     </div>
   </div>
 
@@ -440,7 +585,6 @@ const pollDot = $('#pollDot');
 const pollLabel = $('#pollLabel');
 const pollBtn = $('#pollBtn');
 const activityArea = $('#activityArea');
-const yamlEditor = $('#yamlEditor');
 
 // ═══ API ═══
 async function apiGet(p) { try { const r = await fetch(p); return await r.json(); } catch(e) { return null; } }
@@ -730,11 +874,332 @@ async function loadActivity() {
   activityArea.innerHTML = html;
 }
 
-// ═══ Settings (yaml) ═══
-async function loadYaml() {
-  const data = await apiGet('/api/bridge/yaml');
-  if (data && data.ok) yamlEditor.value = data.yaml;
-  else yamlEditor.value = '# bridge.yaml not found';
+// ═══ Settings (form-based editor) ═══
+function escAttr(s) { return String(s).replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function bodyTemplateToText(bt) {
+  if (!bt) return '{}';
+  if (typeof bt === 'string') return bt;
+  try { return JSON.stringify(bt, null, 2); } catch(e) { return String(bt); }
+}
+
+function textToBodyTemplate(text) {
+  if (!text || !text.trim()) return {};
+  const t = text.trim();
+  try { return JSON.parse(t); } catch(e) { return t; }
+}
+
+function headersToArray(h) {
+  if (!h || typeof h !== 'object') return [];
+  return Object.entries(h).map(([k, v]) => ({k, v}));
+}
+
+function arrayToHeaders(arr) {
+  const h = {};
+  for (const item of arr) {
+    if (item.k && item.k.trim()) h[item.k.trim()] = item.v;
+  }
+  return h;
+}
+
+function renderWakeupHtml(wu, idx) {
+  const wuData = wu || {};
+  const url = wuData.url || '';
+  const method = wuData.method || 'POST';
+  const auth = wuData.auth || {};
+  const authType = auth.type || 'none';
+  const tokenPath = auth.token_path || '';
+  const tokenJsonpath = auth.token_jsonpath || '';
+  const headers = headersToArray(wuData.headers);
+  const bodyText = bodyTemplateToText(wuData.body_template);
+  
+  let headerHtml = '';
+  for (let hi = 0; hi < headers.length; hi++) {
+    headerHtml += `<div class="kv-row">
+      <input type="text" class="header-key" value="${escAttr(headers[hi].k)}" data-idx="${idx}" placeholder="Key" />
+      <input type="text" class="header-val" value="${escAttr(headers[hi].v)}" data-idx="${idx}" placeholder="Value" />
+      <button class="kv-del" onclick="this.parentElement.remove()" title="删除">✕</button>
+    </div>`;
+  }
+
+  return `<div class="wakeup-section" data-agent-idx="${idx}">
+    <div class="wakeup-label">唤醒配置</div>
+    <div class="wakeup-field">
+      <label>Webhook URL</label>
+      <input type="text" class="wu-url" value="${escAttr(url)}" placeholder="http://127.0.0.1:8644/webhooks/..." />
+    </div>
+    <div class="wakeup-field">
+      <label>请求方法</label>
+      <select class="wu-method">
+        <option value="POST" ${method==='POST'?'selected':''}>POST</option>
+        <option value="GET" ${method==='GET'?'selected':''}>GET</option>
+        <option value="PUT" ${method==='PUT'?'selected':''}>PUT</option>
+      </select>
+    </div>
+    <div class="wakeup-field auth-section">
+      <label>认证方式</label>
+      <select class="wu-auth-type" onchange="authTypeChange(this)">
+        <option value="none" ${authType==='none'?'selected':''}>无</option>
+        <option value="bearer" ${authType==='bearer'?'selected':''}>Bearer Token</option>
+      </select>
+      <div class="auth-fields ${authType==='bearer'?'':'hidden'}">
+        <label style="font-size:0.72em;color:var(--text3);margin-top:4px;display:block">Token 文件路径</label>
+        <input type="text" class="wu-token-path" value="${escAttr(tokenPath)}" placeholder="~/.openclaw/openclaw.json" />
+        <label style="font-size:0.72em;color:var(--text3);margin-top:4px;display:block">JSONPath 提取</label>
+        <input type="text" class="wu-token-jsonpath" value="${escAttr(tokenJsonpath)}" placeholder="gateway.auth.password" />
+      </div>
+    </div>
+    <div class="wakeup-field">
+      <label>请求头</label>
+      <div class="wu-headers">${headerHtml || '<div class="kv-row"><input type="text" class="header-key" placeholder="Key"/><input type="text" class="header-val" placeholder="Value"/></div>'}</div>
+      <button class="add-header-btn" onclick="addHeader(this, ${idx})">＋ 添加请求头</button>
+    </div>
+    <div class="wakeup-field">
+      <label>消息体模板 (JSON)</label>
+      <textarea class="wu-body body-editor" rows="3">${escAttr(bodyText)}</textarea>
+    </div>
+  </div>`;
+}
+
+function authTypeChange(sel) {
+  const fields = sel.parentElement.querySelector('.auth-fields');
+  if (sel.value === 'bearer') { fields.classList.remove('hidden'); }
+  else { fields.classList.add('hidden'); }
+}
+
+function addHeader(btn, idx) {
+  const container = btn.previousElementSibling;
+  const row = document.createElement('div');
+  row.className = 'kv-row';
+  row.innerHTML = '<input type="text" class="header-key" placeholder="Key"/><input type="text" class="header-val" placeholder="Value"/><button class="kv-del" onclick="this.parentElement.remove()" title="删除">✕</button>';
+  container.appendChild(row);
+}
+
+function collectAgentData(container) {
+  const idx = container.dataset.agentIdx;
+  const id = container.querySelector('.ag-id').value.trim();
+  const displayName = container.querySelector('.ag-name').value.trim();
+  const color = container.querySelector('.ag-color').value.trim();
+  const cursor = container.querySelector('.ag-cursor').value;
+  const filterFrom = container.querySelector('.ag-filter-from').value.trim();
+  
+  const wuSection = container.querySelector('.wakeup-section');
+  const url = wuSection ? wuSection.querySelector('.wu-url').value.trim() : '';
+  const method = wuSection ? wuSection.querySelector('.wu-method').value : 'POST';
+  const authType = wuSection ? wuSection.querySelector('.wu-auth-type').value : 'none';
+  const tokenPath = wuSection ? wuSection.querySelector('.wu-token-path')?.value.trim() || '' : '';
+  const tokenJsonpath = wuSection ? wuSection.querySelector('.wu-token-jsonpath')?.value.trim() || '' : '';
+  
+  const headers = {};
+  if (wuSection) {
+    wuSection.querySelectorAll('.kv-row').forEach(row => {
+      const k = row.querySelector('.header-key')?.value.trim();
+      const v = row.querySelector('.header-val')?.value.trim();
+      if (k) headers[k] = v || '';
+    });
+  }
+  
+  const bodyText = wuSection ? wuSection.querySelector('.wu-body')?.value || '' : '';
+  const bodyTemplate = textToBodyTemplate(bodyText);
+  
+  const wakeup = {url, method, headers, body_template: bodyTemplate};
+  if (authType === 'bearer' && tokenPath) {
+    wakeup.auth = {type: 'bearer', token_path: tokenPath, token_jsonpath: tokenJsonpath};
+  }
+  
+  return {id, display_name: displayName || id, color, cursor, filter_from: filterFrom, wakeup};
+}
+
+async function loadSettings() {
+  const area = $('#settingsArea');
+  const data = await apiGet('/api/config');
+  if (!data || !data.ok) {
+    area.innerHTML = '<div class="empty-state"><div style="font-size:2.5em;opacity:0.4">⚠</div><h3 style="color:var(--text2);font-weight:500;margin-top:8px;font-size:1em">无法加载配置</h3></div>';
+    return;
+  }
+  renderSettingsForm(data, area);
+}
+
+function renderSettingsForm(data, area) {
+  const agents = data.agents || [];
+  const sharedDir = data.shared_dir || '—';
+  const agentId = data.agent_id || '';
+
+  let agentHtml = '';
+  for (let i = 0; i < agents.length; i++) {
+    const a = agents[i];
+    const color = a.color || '#8888a0';
+    agentHtml += `<div class="agent-config" data-agent-idx="${i}">
+      <div class="agent-config-header">
+        <div class="agent-config-name">
+          <span class="dot" style="background:${color}"></span>
+          ${esc(a.display_name || a.id)}
+        </div>
+        <button class="del-btn" onclick="removeAgent(this)" title="删除此 Agent">🗑 删除</button>
+      </div>
+      <div class="form-grid">
+        <div class="wakeup-field">
+          <label>Agent ID</label>
+          <input type="text" class="ag-id" value="${escAttr(a.id)}" placeholder="e.g. momo" />
+        </div>
+        <div class="wakeup-field">
+          <label>显示名称</label>
+          <input type="text" class="ag-name" value="${escAttr(a.display_name || a.id)}" placeholder="Display name" />
+        </div>
+        <div class="wakeup-field">
+          <label>颜色</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span class="color-preview" style="background:${color}" onclick="this.nextElementSibling.click()"></span>
+            <input type="text" class="ag-color" value="${color}" placeholder="#rrggbb" style="max-width:90px;font-family:var(--font);font-size:0.8em" oninput="this.previousElementSibling.style.background=this.value" />
+          </div>
+        </div>
+        <div class="wakeup-field">
+          <label>游标类型</label>
+          <select class="ag-cursor">
+            <option value="line" ${(a.cursor||'line')==='line'?'selected':''}>line（行号）</option>
+            <option value="timestamp" ${a.cursor==='timestamp'?'selected':''}>timestamp（时间戳）</option>
+          </select>
+        </div>
+        <div class="wakeup-field">
+          <label>只接收来信</label>
+          <input type="text" class="ag-filter-from" value="${escAttr(a.filter_from || '')}" placeholder="对方 Agent ID" />
+        </div>
+      </div>
+      ${renderWakeupHtml(a.wakeup, i)}
+    </div>`;
+  }
+
+  area.innerHTML = `<div class="settings-panel">
+    <div class="settings-section global-section">
+      <div class="settings-section-title">全局</div>
+      <div class="settings-row">
+        <label>共享目录</label>
+        <input type="text" value="${escAttr(sharedDir)}" readonly style="color:var(--text3);font-family:var(--font);font-size:0.8em" />
+      </div>
+      <div class="settings-row">
+        <label>本机角色</label>
+        <select id="settingsAgentId" style="max-width:200px">
+          <option value="">— 未设置 —</option>
+          ${agents.map(a => `<option value="${escAttr(a.id)}" ${agentId===a.id?'selected':''}>${esc(a.display_name || a.id)}</option>`).join('')}
+        </select>
+        <span style="font-size:0.72em;color:var(--text3);margin-left:4px">运行 poll 时使用哪个 Agent 的身份</span>
+      </div>
+    </div>
+    ${agentHtml}
+    <div class="settings-actions">
+      <button class="add-agent-btn" onclick="addAgent()">＋ 添加 Agent</button>
+      <button class="save-btn" onclick="saveFullConfig()">💾 保存配置</button>
+      <span class="save-status" id="saveStatus"></span>
+    </div>
+  </div>`;
+}
+
+function addAgent() {
+  const area = $('#settingsArea');
+  const container = area.querySelector('.settings-panel');
+  if (!container) return;
+  
+  const agents = container.querySelectorAll('.agent-config');
+  const idx = agents.length;
+  
+  const card = document.createElement('div');
+  card.className = 'agent-config';
+  card.dataset.agentIdx = idx;
+  card.innerHTML = `<div class="agent-config-header">
+    <div class="agent-config-name">
+      <span class="dot" style="background:#8888a0"></span>
+      新 Agent
+    </div>
+    <button class="del-btn" onclick="removeAgent(this)" title="删除此 Agent">🗑 删除</button>
+  </div>
+  <div class="form-grid">
+    <div class="wakeup-field">
+      <label>Agent ID</label>
+      <input type="text" class="ag-id" value="" placeholder="e.g. momo" />
+    </div>
+    <div class="wakeup-field">
+      <label>显示名称</label>
+      <input type="text" class="ag-name" value="" placeholder="Display name" />
+    </div>
+    <div class="wakeup-field">
+      <label>颜色</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span class="color-preview" style="background:#8888a0" onclick="this.nextElementSibling.click()"></span>
+        <input type="text" class="ag-color" value="#8888a0" placeholder="#rrggbb" style="max-width:90px;font-family:var(--font);font-size:0.8em" oninput="this.previousElementSibling.style.background=this.value" />
+      </div>
+    </div>
+    <div class="wakeup-field">
+      <label>游标类型</label>
+      <select class="ag-cursor">
+        <option value="line" selected>line（行号）</option>
+        <option value="timestamp">timestamp（时间戳）</option>
+      </select>
+    </div>
+    <div class="wakeup-field">
+      <label>只接收来信</label>
+      <input type="text" class="ag-filter-from" value="" placeholder="对方 Agent ID" />
+    </div>
+  </div>
+  ${renderWakeupHtml({}, idx)}`;
+  
+  container.querySelector('.settings-actions').before(card);
+  card.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function removeAgent(btn) {
+  if (!confirm('确认删除此 Agent？')) return;
+  btn.closest('.agent-config').remove();
+}
+
+async function saveFullConfig() {
+  const status = $('#saveStatus');
+  status.textContent = '保存中…';
+  status.className = 'save-status';
+  
+  const area = $('#settingsArea');
+  const container = area.querySelector('.settings-panel');
+  if (!container) { status.textContent = '表单未加载'; status.className = 'save-status error'; return; }
+  
+  const agentCards = container.querySelectorAll('.agent-config');
+  const agents = [];
+  const errors = [];
+  
+  for (const card of agentCards) {
+    const data = collectAgentData(card);
+    if (!data.id) { errors.push('Agent ID 不能为空'); continue; }
+    if (!/^[a-zA-Z0-9_-]+$/.test(data.id)) { errors.push(`无效 ID: ${data.id}`); continue; }
+    if (!/^#[0-9a-fA-F]{6}$/.test(data.color)) { errors.push(`颜色格式错误: ${data.id}`); continue; }
+    agents.push(data);
+  }
+  
+  if (errors.length) {
+    status.textContent = errors.join('; ');
+    status.className = 'save-status error';
+    return;
+  }
+  
+  if (!agents.length) {
+    status.textContent = '至少需要一个 Agent';
+    status.className = 'save-status error';
+    return;
+  }
+  
+  const agentId = $('#settingsAgentId').value;
+  
+  const r = await apiPost('/api/config/full', {
+    agents: agents,
+    agent_id: agentId,
+  });
+  
+  if (r && r.ok) {
+    status.textContent = '✓ 配置已保存';
+    status.className = 'save-status ok';
+    await loadConfig(); // Refresh badges and cards
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  } else {
+    status.textContent = '保存失败: ' + (r?.error || '服务器错误');
+    status.className = 'save-status error';
+  }
 }
 
 // ═══ Poll control ═══
@@ -769,7 +1234,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     state.activeTab = btn.dataset.tab;
     // Lazy load
     if (btn.dataset.tab === 'activity') loadActivity();
-    if (btn.dataset.tab === 'settings') loadYaml();
+    if (btn.dataset.tab === 'settings') loadSettings();
   });
 });
 

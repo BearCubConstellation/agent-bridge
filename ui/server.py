@@ -237,6 +237,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         routes = {
             "/api/config": self.handle_update_config,
+            "/api/config/full": self.handle_update_config_full,
             "/api/archive": self.handle_archive,
             "/api/poll/now": self.handle_poll_now,
             "/api/poll/start": self.handle_poll_start,
@@ -288,6 +289,9 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 "id": a.get("id", key),
                 "display_name": a.get("display_name", key.capitalize()),
                 "color": a.get("color", "#8888a0"),
+                "cursor": a.get("cursor", "line"),
+                "filter_from": a.get("filter_from", ""),
+                "wakeup": a.get("wakeup", {}),
             })
         self.send_json({
             "ok": True,
@@ -362,6 +366,74 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                         "color": a.get("color", "#8888a0")}
                        for a in cfg["agents"].values()]
         self.send_json({"ok": True, "agents": agents_list, "changes": changes})
+
+    # ─── PUT /api/config/full ───────────────────────
+
+    def handle_update_config_full(self):
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            self.send_json({"ok": False, "error": "empty body"})
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self.send_json({"ok": False, "error": "invalid JSON"})
+            return
+
+        shared = Path(self.shared_dir)
+        cfg, config_path = read_bridge(shared)
+
+        # Shared dir
+        if body.get("shared_dir"):
+            cfg["shared_dir"] = body["shared_dir"]
+        if body.get("agent_id"):
+            cfg["agent_id"] = body["agent_id"]
+
+        # Agents
+        new_agents_list = body.get("agents", [])
+        if new_agents_list:
+            errors = [f"invalid ID: '{a.get('id', '')}'"
+                      for a in new_agents_list
+                      if not validate_agent_id(a.get("id", "").strip())]
+            if errors:
+                self.send_json({"ok": False, "error": "; ".join(errors)})
+                return
+
+            agents_dict = {}
+            for a in new_agents_list:
+                aid = a["id"].strip()
+                entry = {
+                    "id": aid,
+                    "display_name": a.get("display_name", aid).strip() or aid,
+                    "color": a.get("color", "#8888a0").strip(),
+                    "cursor": a.get("cursor", "line"),
+                    "filter_from": a.get("filter_from", ""),
+                }
+                # Wakeup
+                wu = a.get("wakeup", {})
+                wakeup = {
+                    "url": wu.get("url", ""),
+                    "method": wu.get("method", "POST"),
+                    "headers": wu.get("headers", {"Content-Type": "application/json"}),
+                    "body_template": wu.get("body_template", {"message": "{{message}}"}),
+                }
+                # Auth (optional)
+                auth = wu.get("auth")
+                if auth and auth.get("type") == "bearer" and auth.get("token_path"):
+                    wakeup["auth"] = {
+                        "type": "bearer",
+                        "token_path": auth["token_path"],
+                        "token_jsonpath": auth.get("token_jsonpath", ""),
+                    }
+                entry["wakeup"] = wakeup
+                agents_dict[aid] = entry
+
+            cfg["agents"] = agents_dict
+
+        write_bridge(config_path, cfg)
+        self.send_json({"ok": True,
+                        "saved_agents": list(agents_dict.keys()) if new_agents_list else [],
+                        "message": "配置已保存"})
 
     # ─── POST /api/archive ─────────────────────────
 
