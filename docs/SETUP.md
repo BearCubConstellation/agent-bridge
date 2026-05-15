@@ -16,7 +16,7 @@
 ### 1. 安装
 
 ```bash
-git clone https://github.com/yourname/agent-bridge.git ~/agent-bridge
+git clone https://github.com/SusuAgent/agent-bridge.git ~/agent-bridge
 cd ~/agent-bridge
 ```
 
@@ -61,7 +61,7 @@ python3 core/poll.py --config ~/agent-bridge-config.yaml
 ### 1. 安装
 
 ```bash
-git clone https://github.com/yourname/agent-bridge.git ~/agent-bridge
+git clone https://github.com/SusuAgent/agent-bridge.git ~/agent-bridge
 cd ~/agent-bridge
 ```
 

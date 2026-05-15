@@ -28,6 +28,8 @@ agents:
       body_template: {}  # 支持 {{message}} 和 {{from}} 变量
 ```
 
+> 安全提示：`token_path` 指向的文件通常包含 API 密钥。建议设置 `chmod 600` 保护权限。
+
 ---
 
 ## cursor 类型选择

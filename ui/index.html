@@ -599,6 +599,7 @@ async function loadConfig() {
   if (!data || !data.ok) return;
   const agents = data.agents || [];
   state.agents = agents;
+  state.fullAgents = agents; // full data including cursor, filter_from, wakeup
   state.agentIds = agents.map(a => a.id);
   const newMap = {};
   for (const a of agents) newMap[a.id] = {display_name: a.display_name || a.id, color: a.color || '#8888a0'};
@@ -629,11 +630,7 @@ function renderBadges() {
 // ═══ Agent cards (dashboard) ═══
 async function renderCards() {
   cardsBar.innerHTML = '';
-  // Fetch poll status for wakeup indicators
-  const pollData = await apiGet('/api/poll');
-  for (const a of state.agents) {
-    const cfg = await apiGet('/api/config');
-    const fullCfg = cfg && cfg.agents ? cfg.agents.find(x => x.id === a.id) : null;
+  for (const a of (state.fullAgents || state.agents)) {
     const card = document.createElement('div');
     card.className = 'agent-card';
     card.innerHTML = `
@@ -642,11 +639,11 @@ async function renderCards() {
         <span class="agent-card-name" style="color:${a.color}">${esc(a.display_name || a.id)}</span>
       </div>
       <div class="agent-card-row"><span class="label">ID</span><span class="val">${esc(a.id)}</span></div>
-      <div class="agent-card-row"><span class="label">来自</span><span class="val">${esc(fullCfg?.filter_from || '—')}</span></div>
-      <div class="agent-card-row"><span class="label">游标</span><span class="val">${esc(fullCfg?.cursor || 'line')}</span></div>
+      <div class="agent-card-row"><span class="label">来自</span><span class="val">${esc(a.filter_from || '—')}</span></div>
+      <div class="agent-card-row"><span class="label">游标</span><span class="val">${esc(a.cursor || 'line')}</span></div>
       <div class="agent-card-row">
         <span class="label">唤醒</span>
-        <span class="val ${fullCfg?.wakeup?.url ? 'ok' : 'warn'}">${fullCfg?.wakeup?.url ? '✓ 已配置' : '✗ 未配置'}</span>
+        <span class="val ${a.wakeup?.url ? 'ok' : 'warn'}">${a.wakeup?.url ? '✓ 已配置' : '✗ 未配置'}</span>
       </div>`;
     cardsBar.appendChild(card);
   }
@@ -956,9 +953,29 @@ function renderWakeupHtml(wu, idx) {
     </div>
     <div class="wakeup-field">
       <label>消息体模板 (JSON)</label>
+      <select class="wu-body-preset" onchange="applyBodyPreset(this)" style="margin-bottom:4px">
+        <option value="">-- 选择模板 --</option>
+        <option value='{"message": "{{message}}"}'>Hermes (简单消息)</option>
+        <option value='{"message": "[{{from}}] {{message}}"}'>Hermes (带来源)</option>
+        <option value='{"tool": "sessions_send", "args": {"sessionKey": "agent:main:main", "message": "[消息通道·{{from}}] {{message}}"}}'>OpenClaw (sessions_send)</option>
+        <option value='{"text": "{{message}}", "from": "{{from}}"}'>通用 JSON</option>
+      </select>
       <textarea class="wu-body body-editor" rows="3">${escAttr(bodyText)}</textarea>
     </div>
   </div>`;
+}
+
+function applyBodyPreset(selectEl) {
+  const val = selectEl.value;
+  if (!val) return; // '-- 选择模板 --' selected, no action
+  const textarea = selectEl.parentElement.querySelector('.wu-body');
+  if (!textarea) return;
+  try {
+    const obj = JSON.parse(val);
+    textarea.value = JSON.stringify(obj, null, 2);
+  } catch(e) {
+    textarea.value = val;
+  }
 }
 
 function authTypeChange(sel) {

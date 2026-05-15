@@ -24,6 +24,52 @@ import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# ---------------------------------------------------------------------------
+# Cross-platform file locking helpers (same pattern as send.py)
+# ---------------------------------------------------------------------------
+import ctypes
+import ctypes.wintypes
+import platform
+
+_IS_WINDOWS = platform.system() == "Windows"
+
+if _IS_WINDOWS:
+    import msvcrt
+
+    def lock_file(f):
+        """Acquire an exclusive lock on *f* (Windows)."""
+        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        f.seek(0, 2)  # seek to end so append position is correct after lock
+
+    def unlock_file(f):
+        """Release the lock on *f* (Windows)."""
+        try:
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+else:
+    try:
+        import fcntl as _fcntl
+
+        def lock_file(f):
+            """Acquire an exclusive lock on *f* (Unix)."""
+            _fcntl.flock(f.fileno(), _fcntl.LOCK_EX)
+
+        def unlock_file(f):
+            """Release the lock on *f* (Unix)."""
+            try:
+                _fcntl.flock(f.fileno(), _fcntl.LOCK_UN)
+            except OSError:
+                pass
+    except ImportError:
+
+        def lock_file(f):
+            pass
+
+        def unlock_file(f):
+            pass
+
 
 ARCHIVE_MSG_LIMIT = 60
 ARCHIVE_IDLE_MINUTES = 30
@@ -189,19 +235,48 @@ def do_archive(shared_dir):
     active_file = shared_dir / "active.jsonl"
     if not active_file.exists():
         return None
-    history_dir = shared_dir / "history"
-    history_dir.mkdir(parents=True, exist_ok=True)
-    now = datetime.now().strftime("%Y-%m-%d_%H%M")
-    archive_name = f"{now}.jsonl"
-    archive_path = history_dir / archive_name
-    try:
-        shutil.move(str(active_file), str(archive_path))
-        return archive_name
-    except OSError:
-        return None
+
+    # Use a separate lock file to prevent race conditions between agents
+    lock_path = shared_dir / ".archive.lock"
+    shared_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(lock_path, "w") as lockf:
+        lock_file(lockf)
+        try:
+            # Re-check after acquiring lock — another agent may have archived
+            if not active_file.exists():
+                return None
+
+            history_dir = shared_dir / "history"
+            history_dir.mkdir(parents=True, exist_ok=True)
+            now = datetime.now().strftime("%Y-%m-%d_%H%M")
+            archive_name = f"{now}.jsonl"
+            archive_path = history_dir / archive_name
+            try:
+                shutil.move(str(active_file), str(archive_path))
+                return archive_name
+            except OSError:
+                return None
+        finally:
+            unlock_file(lockf)
 
 
 # ─── 核心轮询（可导入） ──────────────────────────────
+
+def _get_retry_count(config, my_agent):
+    """Determine retry count from wakeup.retry, env AGENT_BRIDGE_RETRY, or default 1."""
+    wakeup_cfg = my_agent.get("wakeup", {})
+    retry = wakeup_cfg.get("retry", None)
+    if retry is not None:
+        return int(retry)
+    env_val = os.environ.get("AGENT_BRIDGE_RETRY", "")
+    if env_val.strip():
+        try:
+            return int(env_val)
+        except ValueError:
+            pass
+    return 1
+
 
 def run_poll(config):
     """
@@ -212,6 +287,7 @@ def run_poll(config):
       delivered: bool      — 是否成功通知对方
       error: str           — 错误信息
       to_agent: str        — 消息发给了谁
+      retries: int         — webhook 重试次数
     """
     result = {
         "ok": False,
@@ -220,6 +296,7 @@ def run_poll(config):
         "delivered": False,
         "error": "",
         "to_agent": "",
+        "retries": 0,
     }
 
     shared_dir = resolve_path(config.get("shared_dir", "~/.agent-bridge"))
@@ -280,30 +357,45 @@ def run_poll(config):
         result["ok"] = True
         return result
 
-    # 更新游标
-    if cursor_type == "line":
-        write_cursor(cursor_file, cursor_type, len(msgs))
-    else:
-        latest_ts = new_msgs[-1].get("ts", "")
-        try:
-            write_cursor(cursor_file, cursor_type,
-                         datetime.strptime(latest_ts, "%Y-%m-%d %H:%M:%S"))
-        except ValueError:
-            pass
-
-    # 唤醒
+    # ── 唤醒（先尝试 webhook，再更新游标） ──
     combined = "\n".join(m.get("msg", "") for m in new_msgs)
     wakeup_cfg = my_agent.get("wakeup", {})
     if not wakeup_cfg:
         result["error"] = f"no wakeup configuration for {my_id}"
         return result
 
-    delivered, msg = wakeup_agent(wakeup_cfg, combined, filter_from)
+    max_retries = _get_retry_count(config, my_agent)
+    delivered = False
+    last_err = ""
+    attempts = 0
+
+    for attempt in range(1 + max_retries):
+        attempts += 1
+        delivered, msg = wakeup_agent(wakeup_cfg, combined, filter_from)
+        if delivered:
+            break
+        last_err = msg
+
+    result["retries"] = attempts - 1
     result["delivered"] = delivered
     result["to_agent"] = filter_from
-    result["ok"] = delivered
-    if not delivered:
-        result["error"] = msg
+
+    # Only update cursor on successful delivery
+    if delivered:
+        if cursor_type == "line":
+            write_cursor(cursor_file, cursor_type, len(msgs))
+        else:
+            latest_ts = new_msgs[-1].get("ts", "")
+            try:
+                write_cursor(cursor_file, cursor_type,
+                             datetime.strptime(latest_ts, "%Y-%m-%d %H:%M:%S"))
+            except ValueError:
+                pass
+        result["ok"] = True
+    else:
+        result["ok"] = False
+        result["error"] = last_err
+
     return result
 
 

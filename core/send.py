@@ -19,6 +19,52 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# ---------------------------------------------------------------------------
+# Cross-platform file locking helpers
+# ---------------------------------------------------------------------------
+import platform
+
+_IS_WINDOWS = platform.system() == "Windows"
+
+if _IS_WINDOWS:
+    # Windows: use msvcrt.locking (available on CPython for Windows)
+    import msvcrt
+
+    def lock_file(f):
+        """Acquire an exclusive lock on *f* (Windows)."""
+        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        f.seek(0, 2)  # seek to end so append position is correct after lock
+
+    def unlock_file(f):
+        """Release the lock on *f* (Windows)."""
+        try:
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+else:
+    # Unix: use fcntl.flock (stdlib on all Unix-like systems)
+    try:
+        import fcntl as _fcntl
+
+        def lock_file(f):
+            """Acquire an exclusive lock on *f* (Unix)."""
+            _fcntl.flock(f.fileno(), _fcntl.LOCK_EX)
+
+        def unlock_file(f):
+            """Release the lock on *f* (Unix)."""
+            try:
+                _fcntl.flock(f.fileno(), _fcntl.LOCK_UN)
+            except OSError:
+                pass
+    except ImportError:
+        # Extremely unlikely on Unix, but fall back gracefully
+        def lock_file(f):
+            pass
+
+        def unlock_file(f):
+            pass
+
 
 DEFAULT_BRIDGE_CANDIDATES = [
     Path.home() / ".agent-bridge" / "bridge.yaml",
@@ -83,7 +129,11 @@ def send(agent_id, active_file, text):
         "msg": text,
     }
     with open(active_file, "a") as f:
-        f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        lock_file(f)
+        try:
+            f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        finally:
+            unlock_file(f)
     print(f"[{agent_id}] ✓ Message sent ({len(text)} chars)")
 
 

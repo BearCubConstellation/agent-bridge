@@ -11,6 +11,7 @@ Agent Bridge — 本地 UI 服务
     python3 server.py --poll-interval 60       # 每 60 秒轮询一次
 """
 import argparse
+import fcntl
 import http.server
 import json
 import os
@@ -31,6 +32,25 @@ from poll import run_poll, load_config as load_poll_config
 BRIDGE_FILENAME = "bridge.yaml"
 VALID_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
 DEFAULT_POLL_INTERVAL = 180  # 秒
+
+
+def _file_lock(lock_path):
+    """Acquire an exclusive file lock (context manager). Usage: with _file_lock(path): ..."""
+    import contextlib
+
+    @contextlib.contextmanager
+    def _lock():
+        fd = None
+        try:
+            fd = open(lock_path, "w")
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield fd
+        finally:
+            if fd is not None:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                fd.close()
+
+    return _lock()
 
 
 # ─── 配置 ─────────────────────────────────────────────
@@ -431,8 +451,9 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             cfg["agents"] = agents_dict
 
         write_bridge(config_path, cfg)
+        saved_agents = list(agents_dict.keys()) if new_agents_list else []
         self.send_json({"ok": True,
-                        "saved_agents": list(agents_dict.keys()) if new_agents_list else [],
+                        "saved_agents": saved_agents,
                         "message": "配置已保存"})
 
     # ─── POST /api/archive ─────────────────────────
@@ -452,7 +473,8 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         now = datetime.now().strftime("%Y-%m-%d_%H%M")
         name = f"{now}.jsonl"
         try:
-            shutil.move(str(active), str(history / name))
+            with _file_lock(shared / ".archive.lock"):
+                shutil.move(str(active), str(history / name))
             self.send_json({"ok": True, "archived_to": name, "message_count": len(msgs)})
         except OSError as e:
             self.send_json({"ok": False, "error": str(e)})
@@ -527,8 +549,9 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "from": agent_id,
             "msg": text,
         }
-        with open(active, "a") as f:
-            f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        with _file_lock(shared / ".active.lock"):
+            with open(active, "a") as f:
+                f.write(json.dumps(msg, ensure_ascii=False) + "\n")
 
         self.send_json({"ok": True, "agent_id": agent_id, "chars": len(text)})
 
