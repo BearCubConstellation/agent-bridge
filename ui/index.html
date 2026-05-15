@@ -177,13 +177,22 @@ body {
 .footer-stats {
   position: fixed; bottom: 0; left: 0; right: 0;
   background: var(--surface); border-top: 1px solid var(--border);
-  padding: 10px 24px; display: flex; align-items: center;
-  justify-content: space-between; font-size: 0.78em;
+  padding: 8px 24px; display: flex; align-items: center;
+  justify-content: space-between; font-size: 0.76em;
   color: var(--text3); font-family: var(--font); backdrop-filter: blur(8px); z-index: 100;
 }
-.stat-item { display: flex; align-items: center; gap: 6px; }
+.stat-item { display: flex; align-items: center; gap: 5px; }
 .stat-value { color: var(--text2); }
 .stat-sep { opacity: 0.3; }
+.poll-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.poll-dot.active { background: var(--green); }
+.poll-dot.stopped { background: var(--text3); }
+.poll-btn {
+  background: none; border: 1px solid var(--border); color: var(--text3);
+  padding: 2px 8px; border-radius: 4px; cursor: pointer;
+  font-size: 0.85em; font-family: var(--font); transition: all 0.15s;
+}
+.poll-btn:hover { background: var(--surface2); color: var(--text2); }
 
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -239,7 +248,7 @@ body {
   </div>
   <div class="stat-item">
     <span class="stat-sep">·</span>
-    <span>最后活动</span>
+    <span>最后</span>
     <span class="stat-value" id="statLast">—</span>
   </div>
   <div class="stat-item">
@@ -248,8 +257,9 @@ body {
     <span class="stat-value" id="statFile">—</span>
   </div>
   <div class="stat-item" style="margin-left:auto;">
-    <span>轮询</span>
-    <span class="stat-value" id="statPoll">5s</span>
+    <span class="poll-dot" id="pollDot"></span>
+    <span id="pollLabel">轮询</span>
+    <button class="poll-btn" id="pollBtn" title="手动触发轮询">▶</button>
   </div>
 </div>
 
@@ -289,6 +299,9 @@ const badgeContainer = $('#agentBadgeContainer');
 const statCount = $('#statCount');
 const statLast = $('#statLast');
 const statFile = $('#statFile');
+const pollDot = $('#pollDot');
+const pollLabel = $('#pollLabel');
+const pollBtn = $('#pollBtn');
 
 // ═══ API ═══
 async function apiGet(path) {
@@ -682,11 +695,18 @@ archiveBtn.addEventListener('click', async () => {
 function startAutoRefresh() {
   stopAutoRefresh();
   state.pollInterval = setInterval(() => {
-    if (!document.hidden) refreshAll();
+    if (!document.hidden) {
+      refreshAll();
+    }
   }, 5000);
+  // Poll status refreshes more frequently
+  pollStatusTimer = setInterval(() => {
+    if (!document.hidden) loadPollStatus();
+  }, 3000);
 }
 function stopAutoRefresh() {
   if (state.pollInterval) { clearInterval(state.pollInterval); state.pollInterval = null; }
+  if (pollStatusTimer) { clearInterval(pollStatusTimer); pollStatusTimer = null; }
 }
 autoDot.addEventListener('click', () => {
   state.autoRefresh = !state.autoRefresh;
@@ -699,8 +719,45 @@ document.addEventListener('visibilitychange', () => {
 });
 
 async function refreshAll() {
-  await Promise.all([loadConfig(), loadMessages(), loadStatus()]);
+  await Promise.all([loadConfig(), loadMessages(), loadStatus(), loadPollStatus()]);
 }
+
+// ═══ Poll control ═══
+let pollStatusTimer = null;
+
+async function loadPollStatus() {
+  const data = await apiGet('/api/poll');
+  if (!data || !data.ok) return;
+  const running = data.running;
+  pollDot.className = 'poll-dot ' + (running ? 'active' : 'stopped');
+  pollLabel.textContent = running ? '轮询中' : '已暂停';
+  pollBtn.textContent = running ? '∥' : '▶';
+  pollBtn.title = running ? '暂停轮询' : '启动轮询';
+
+  if (data.last_run) {
+    const time = data.last_run.slice(11, 19);
+    statLast.textContent = time;
+  }
+}
+
+pollBtn.addEventListener('click', async () => {
+  const data = await apiGet('/api/poll');
+  const running = data && data.running;
+  if (running) {
+    await apiPost('/api/poll/stop', {});
+  } else {
+    await apiPost('/api/poll/start', {});
+  }
+  await loadPollStatus();
+});
+
+// Double-click poll button to trigger immediate poll
+pollBtn.addEventListener('dblclick', async () => {
+  const result = await apiPost('/api/poll/now', {});
+  if (result && result.ok) {
+    await refreshAll();
+  }
+});
 
 // ═══ Init ═══
 async function init() {

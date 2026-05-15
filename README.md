@@ -8,17 +8,19 @@
 ## 原理
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    共享目录                           │
-│                                                     │
-│  Agent A ── write ──► active.jsonl ◄── write ── Agent B
-│     ▲                                    ▲
-│     │  poll.py 每 3 分钟检查               │
-│     │  有对方的新消息 → POST webhook       │
-│     ▼                                    ▼
-│  (Agent A 被唤醒)                   (Agent B 被唤醒)
-│                                                     │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│                  共享目录                      │
+│                                              │
+│  Agent A  ──写入──►  active.jsonl  ◄──写入──  Agent B  │
+│     ▲                        │                    │
+│     │ 每 3min                │ 每 3min            │
+│     ▼                        ▼                    │
+│  poll.py ◄───────────── config ─────────────► poll.py      │
+│     │                        │                    │
+│     ▼                        ▼                    │
+│  POST webhook               POST API              │
+│  (唤醒 Agent A)              (唤醒 Agent B)       │
+└──────────────────────────────────────────────┘
 ```
 
 两个 agent 不直接对话。它们通过共享目录下的 `active.jsonl` 文件交换 JSON 消息。
@@ -29,7 +31,7 @@
 
 ## 快速开始
 
-### 1. 启动 UI
+### 1. 启动（一个命令启动所有）
 
 ```bash
 git clone https://github.com/SusuAgent/agent-bridge.git
@@ -39,33 +41,30 @@ python3 ui/server.py --open
 # → http://127.0.0.1:7899
 ```
 
-首次运行自动检测已有对话文件，生成 `bridge.yaml`。在页面顶部点击
-Agent Badge 修改 ID、显示名称和颜色。
+服务器会自动：
+- 检测或生成 `bridge.yaml` 配置文件
+- 每 3 分钟轮询一次，检查对方 agent 的新消息
+- 有消息时通过 webhook 唤醒对方
+- 超过 60 条或空闲 30 分钟时自动归档
 
-### 2. 部署轮询脚本
+### 2. 在页面中配置
 
-确定本机 agent 的身份（比如 `alice`），运行：
+点击顶部 Agent Badge（彩色圆点）编辑身份：
 
-```bash
-# macOS
-bash setup/macos.sh --agent alice \
-  --config /path/to/bridge.yaml
+| 选项 | 说明 |
+|------|------|
+| Agent ID | 消息发送标识，改后游标文件自动迁移 |
+| 显示名称 | UI 气泡中显示的名字 |
+| 颜色 | 圆形头像和气泡标签的颜色 |
 
-# Linux
-bash setup/linux.sh --agent alice \
-  --config /path/to/bridge.yaml
-```
-
-对方的机器上以同样的方式部署 `bob` 的轮询。
-
-> **提示**：如果你只需要在同一台机器上快速测试两个 agent 的对话，
-> 也可以手动运行 `python3 core/poll.py --config bridge.yaml --agent alice`
-> 来触发单次检查，不需要安装 launchd/systemd。
+页脚显示轮询状态：绿点运行中，灰点已暂停。
+单击 ▶/∥ 按钮暂停/恢复轮询，双击 ▶ 立即触发一次轮询。
 
 ### 3. 发消息
 
 ```bash
 python3 core/send.py --bridge bridge.yaml --agent alice "你好！"
+
 # 或设置环境变量后省略参数
 export AGENT_ID=alice
 python3 core/send.py "你好！"

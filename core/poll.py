@@ -6,46 +6,14 @@ Agent Bridge — 通用轮询检查脚本
 无新消息时零 token 消耗退出。
 检测到归档条件时自动归档 active.jsonl。
 
-用法:
-    python3 poll.py --config bridge.yaml --agent alice  # 一次检查（由 cron/launchd 每 3 分钟调度）
+本模块也可被 server.py 导入，在 UI 内部执行定时轮询。
 
-配置格式 (bridge.yaml):
-    shared_dir: ~/.agent-bridge
-    agent_id: alice       # 本机 agent 标识
-    agents:
-      alice:
-        id: alice
-        display_name: "Alice"
-        color: "#ff6b6b"
-        cursor: line              # line | timestamp
-        filter_from: bob          # 只处理谁的消息
-        wakeup:
-          url: "http://127.0.0.1:8644/webhooks/agent-reply"
-          method: POST
-          headers:
-            Content-Type: application/json
-          body_template:
-            message: "{{message}}"
-      bob:
-        id: bob
-        display_name: "Bob"
-        color: "#4ecdc4"
-        cursor: timestamp
-        filter_from: alice
-        wakeup:
-          url: "http://127.0.0.1:18789/tools/invoke"
-          method: POST
-          auth:
-            type: bearer
-            token_path: ~/.bob/config.json
-            token_jsonpath: api_key
-          headers:
-            Content-Type: application/json
-          body_template:
-            tool: sessions_send
-            args:
-              sessionKey: agent:main:main
-              message: "{{message}}"
+用法:
+    python3 poll.py --config bridge.yaml --agent alice
+
+导入:
+    from poll import run_poll
+    result = run_poll(config)
 """
 import json
 import os
@@ -57,12 +25,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 
-ARCHIVE_MSG_LIMIT = 60          # 超过此条数归档
-ARCHIVE_IDLE_MINUTES = 30       # 超过此空闲分钟归档
+ARCHIVE_MSG_LIMIT = 60
+ARCHIVE_IDLE_MINUTES = 30
 
+
+# ─── 配置 ─────────────────────────────────────────────
 
 def load_config(config_path):
-    """Load YAML config. Returns {} on any error."""
     try:
         try:
             import yaml
@@ -73,19 +42,18 @@ def load_config(config_path):
             with open(config_path) as f:
                 return _json.load(f)
     except (FileNotFoundError, PermissionError):
-        print(f"ERROR: config file not found or not readable: {config_path}", file=sys.stderr)
-        sys.exit(1)
-    except (yaml.YAMLError, json.JSONDecodeError) as e:
-        print(f"ERROR: invalid config file: {e}", file=sys.stderr)
+        print(f"ERROR: config file not found: {config_path}", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        print(f"ERROR: failed to load config: {e}", file=sys.stderr)
+        print(f"ERROR: invalid config: {e}", file=sys.stderr)
         sys.exit(1)
 
 
 def resolve_path(p):
     return Path(os.path.expandvars(os.path.expanduser(str(p))))
 
+
+# ─── 游标 ─────────────────────────────────────────────
 
 def get_cursor_file(shared_dir, agent_id, cursor_type):
     if cursor_type == "timestamp":
@@ -117,11 +85,12 @@ def write_cursor(cursor_file, cursor_type, value):
         cursor_file.write_text(str(value))
 
 
+# ─── Webhook 唤醒 ─────────────────────────────────────
+
 def wakeup_agent(wakeup_cfg, message_text, from_agent):
     url = wakeup_cfg.get("url", "")
     if not url:
-        print("ERROR: wakeup URL is empty", file=sys.stderr)
-        return False
+        return (False, "wakeup URL is empty")
 
     body = build_body(wakeup_cfg.get("body_template", {}), message_text, from_agent)
     headers = dict(wakeup_cfg.get("headers", {}))
@@ -138,14 +107,11 @@ def wakeup_agent(wakeup_cfg, message_text, from_agent):
 
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
-            print(f"OK: delivered to {url} (status={resp.status})")
-            return True
+            return (True, f"status={resp.status}")
     except urllib.error.HTTPError as e:
-        print(f"ERROR: HTTP {e.code} from {url}: {e.read().decode()[:200]}", file=sys.stderr)
-        return False
+        return (False, f"HTTP {e.code}: {e.read().decode()[:100]}")
     except Exception as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        return False
+        return (False, str(e))
 
 
 def build_body(template, message_text, from_agent):
@@ -166,20 +132,15 @@ def build_body(template, message_text, from_agent):
 def resolve_token(auth_cfg):
     token_path = auth_cfg.get("token_path")
     jsonpath = auth_cfg.get("token_jsonpath", "")
-
     if not token_path:
         return None
-
     p = resolve_path(token_path)
     if not p.exists():
-        print(f"WARN: token file not found: {p}", file=sys.stderr)
         return None
-
     try:
         data = json.loads(p.read_text())
     except json.JSONDecodeError:
         return p.read_text().strip()
-
     if jsonpath:
         parts = jsonpath.split(".")
         val = data
@@ -189,40 +150,29 @@ def resolve_token(auth_cfg):
             else:
                 return None
         return str(val) if val else None
-
     return str(data) if isinstance(data, str) else json.dumps(data)
 
 
+# ─── 消息文件 ──────────────────────────────────────────
+
 def parse_jsonl(filepath):
-    """Parse a JSONL file into a list of dicts. Returns [] on error."""
-    msgs = []
     if not filepath or not filepath.exists():
-        return msgs
+        return []
     try:
         with open(filepath) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    msgs.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-    except (OSError, PermissionError) as e:
-        print(f"WARN: cannot read {filepath}: {e}", file=sys.stderr)
-    return msgs
+            return [json.loads(line) for line in f if line.strip()]
+    except (OSError, json.JSONDecodeError):
+        return []
 
+
+# ─── 归档 ──────────────────────────────────────────────
 
 def should_archive(active_file):
-    """检查是否满足归档条件。"""
     msgs = parse_jsonl(active_file)
     if not msgs:
         return False
-
     if len(msgs) >= ARCHIVE_MSG_LIMIT:
         return True
-
-    # 检查最后一条消息的时间
     last_ts = msgs[-1].get("ts", "")
     if not last_ts:
         return False
@@ -230,47 +180,62 @@ def should_archive(active_file):
         last_dt = datetime.strptime(last_ts, "%Y-%m-%d %H:%M:%S")
     except ValueError:
         return False
-
-    now = datetime.now()
-    if now - last_dt > timedelta(minutes=ARCHIVE_IDLE_MINUTES):
+    if datetime.now() - last_dt > timedelta(minutes=ARCHIVE_IDLE_MINUTES):
         return True
-
     return False
 
 
 def do_archive(shared_dir):
-    """将 active.jsonl 移动到 history/ 目录。"""
     active_file = shared_dir / "active.jsonl"
     if not active_file.exists():
-        return
-
+        return None
     history_dir = shared_dir / "history"
     history_dir.mkdir(parents=True, exist_ok=True)
-
     now = datetime.now().strftime("%Y-%m-%d_%H%M")
     archive_name = f"{now}.jsonl"
     archive_path = history_dir / archive_name
-
     try:
         shutil.move(str(active_file), str(archive_path))
-        print(f"Archived: {active_file.name} → {archive_name} ({archive_path.stat().st_size} bytes)")
-    except OSError as e:
-        print(f"WARN: archive failed: {e}", file=sys.stderr)
+        return archive_name
+    except OSError:
+        return None
 
 
-def check_for_messages(config):
-    """Main check + archive logic."""
+# ─── 核心轮询（可导入） ──────────────────────────────
+
+def run_poll(config):
+    """
+    执行一次轮询。返回 dict:
+      ok: bool             — 是否无错误完成
+      archived: str|None   — 归档文件名（如有）
+      new_msgs: int        — 发现的新消息数
+      delivered: bool      — 是否成功通知对方
+      error: str           — 错误信息
+      to_agent: str        — 消息发给了谁
+    """
+    result = {
+        "ok": False,
+        "archived": None,
+        "new_msgs": 0,
+        "delivered": False,
+        "error": "",
+        "to_agent": "",
+    }
+
     shared_dir = resolve_path(config.get("shared_dir", "~/.agent-bridge"))
     active_file = shared_dir / "active.jsonl"
 
     if not active_file.exists():
-        sys.exit(0)
+        result["ok"] = True
+        return result
 
-    # ── 归档检查 ──
+    # ── 归档 ──
     if should_archive(active_file):
-        do_archive(shared_dir)
-        # 归档后没有 active 文件了，直接退出
-        sys.exit(0)
+        name = do_archive(shared_dir)
+        result["ok"] = True
+        result["archived"] = name
+        result["error"] = "" if name else "archive failed"
+        return result
 
     # ── 消息检查 ──
     agents = config.get("agents", {})
@@ -280,15 +245,16 @@ def check_for_messages(config):
     filter_from = my_agent.get("filter_from", "")
 
     if not my_id or not filter_from:
-        print("ERROR: agent_id and filter_from must be configured", file=sys.stderr)
-        sys.exit(1)
+        result["error"] = "agent_id and filter_from must be configured"
+        return result
 
     cursor_file = get_cursor_file(shared_dir, my_id, cursor_type)
     cursor = read_cursor(cursor_file, cursor_type)
 
     msgs = parse_jsonl(active_file)
     if not msgs:
-        sys.exit(0)
+        result["ok"] = True
+        return result
 
     new_msgs = []
     for i, msg in enumerate(msgs):
@@ -308,10 +274,13 @@ def check_for_messages(config):
             if cursor is None or msg_ts > cursor:
                 new_msgs.append(msg)
 
-    if not new_msgs:
-        sys.exit(0)
+    result["new_msgs"] = len(new_msgs)
 
-    # Update cursor
+    if not new_msgs:
+        result["ok"] = True
+        return result
+
+    # 更新游标
     if cursor_type == "line":
         write_cursor(cursor_file, cursor_type, len(msgs))
     else:
@@ -322,33 +291,46 @@ def check_for_messages(config):
         except ValueError:
             pass
 
+    # 唤醒
     combined = "\n".join(m.get("msg", "") for m in new_msgs)
     wakeup_cfg = my_agent.get("wakeup", {})
     if not wakeup_cfg:
-        print("ERROR: no wakeup configuration for agent", my_id, file=sys.stderr)
-        sys.exit(1)
+        result["error"] = f"no wakeup configuration for {my_id}"
+        return result
 
-    success = wakeup_agent(wakeup_cfg, combined, filter_from)
-    sys.exit(0 if success else 1)
+    delivered, msg = wakeup_agent(wakeup_cfg, combined, filter_from)
+    result["delivered"] = delivered
+    result["to_agent"] = filter_from
+    result["ok"] = delivered
+    if not delivered:
+        result["error"] = msg
+    return result
 
+
+# ─── CLI 入口 ─────────────────────────────────────────
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(
-        description="Agent Bridge — poll for new messages and auto-archive"
-    )
-    parser.add_argument("--config", "-c", required=True,
-                        help="Path to bridge.yaml")
+    parser = argparse.ArgumentParser(description="Agent Bridge — poll")
+    parser.add_argument("--config", "-c", required=True, help="Path to bridge.yaml")
     parser.add_argument("--agent", "-a",
-                        help="Agent ID to run as (overrides config top-level agent_id)")
+                        help="Agent ID (overrides config top-level agent_id)")
     args = parser.parse_args()
 
     config = load_config(args.config)
-
     if args.agent:
         config["agent_id"] = args.agent
 
-    check_for_messages(config)
+    result = run_poll(config)
+    if result["archived"]:
+        print(f"Archived: {result['archived']}")
+    elif result["delivered"]:
+        print(f"Delivered {result['new_msgs']} message(s) to {result['to_agent']}")
+    elif result["error"]:
+        print(f"ERROR: {result['error']}", file=sys.stderr)
+        sys.exit(1)
+
+    sys.exit(0)
 
 
 if __name__ == "__main__":

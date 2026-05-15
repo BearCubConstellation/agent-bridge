@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-Agent Bridge — 本地 UI 服务器
+Agent Bridge — 本地 UI 服务
 
-聊天时间线 + Agent 身份管理（ID/名称/颜色）。
-读写统一的 bridge.yaml，UI 编辑的结果同步到所有 CLI 工具。
-支持手动归档。
+集成了轮询 + 配置管理 + 聊天时间线。
+只需要跑这一个进程。
 
 用法:
-    python3 server.py
-    python3 server.py --dir ~/.shared-chat --port 8080
-    python3 server.py --open
+    python3 server.py                          # 默认 7899 端口
+    python3 server.py --open                   # 自动打开浏览器
+    python3 server.py --poll-interval 60       # 每 60 秒轮询一次
 """
 import argparse
 import http.server
@@ -18,18 +17,23 @@ import os
 import re
 import shutil
 import sys
+import threading
+import time
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
+# 从 poll.py 导入核心轮询逻辑
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
+from poll import run_poll, load_config as load_poll_config
+
 
 BRIDGE_FILENAME = "bridge.yaml"
-ARCHIVE_MSG_LIMIT = 60
-ARCHIVE_IDLE_MINUTES = 30
 VALID_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
+DEFAULT_POLL_INTERVAL = 180  # 秒
 
 
-# ─── Config utils ────────────────────────────────────
+# ─── 配置 ─────────────────────────────────────────────
 
 def find_shared_dir():
     for d in [Path.home() / ".agent-bridge", Path.home() / ".shared-chat"]:
@@ -44,7 +48,7 @@ def parse_jsonl(filepath):
         return []
     try:
         with open(filepath) as f:
-            return [json.loads(line) for line in f if line.strip() and json.loads(line)]
+            return [json.loads(line) for line in f if line.strip()]
     except (OSError, json.JSONDecodeError):
         return []
 
@@ -81,24 +85,21 @@ def read_bridge(shared_dir):
             try:
                 with open(config_path) as f:
                     cfg = _json.load(f)
-            except (json.JSONDecodeError, Exception):
+            except Exception:
                 cfg = {}
     else:
         cfg = {}
 
     cfg.setdefault("shared_dir", str(shared_dir))
     cfg.setdefault("agent_id", "")
-
     if "agents" not in cfg or not cfg["agents"]:
         cfg["agents"] = default_agents(shared_dir)
-
     for key, a in cfg["agents"].items():
         a.setdefault("display_name", a.get("id", key).capitalize())
         a.setdefault("color", "#ff6b6b" if list(cfg["agents"].keys())[0] == key else "#4ecdc4")
         a.setdefault("id", key)
         a.setdefault("cursor", "line")
         a.setdefault("wakeup", {"url": "", "method": "POST", "body_template": {"message": "{{message}}"}})
-
     return cfg, config_path
 
 
@@ -127,24 +128,97 @@ def validate_agent_id(aid):
     return bool(aid and VALID_ID_RE.match(aid))
 
 
-# ─── HTTP handler ────────────────────────────────────
+# ─── 后台轮询 ─────────────────────────────────────────
+
+class PollManager:
+    """管理后台轮询线程。"""
+
+    def __init__(self, shared_dir, interval=DEFAULT_POLL_INTERVAL):
+        self.shared_dir = shared_dir
+        self.interval = interval
+        self._thread = None
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+
+        # 最近一次轮询结果
+        self.last_result = {"ok": True, "new_msgs": 0, "delivered": False,
+                            "archived": None, "error": "", "to_agent": ""}
+        self.last_run = None  # iso timestamp
+        self.running = False
+
+    def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, daemon=True,
+                                        name="poll-worker")
+        self._thread.start()
+        self.running = True
+
+    def stop(self):
+        self._stop.set()
+        self.running = False
+
+    def poll_now(self):
+        """立即触发一次轮询（同步执行）。"""
+        return self._do_poll()
+
+    def is_running(self):
+        return self.running and (self._thread is None or self._thread.is_alive())
+
+    def _loop(self):
+        while not self._stop.is_set():
+            self._do_poll()
+            self._stop.wait(self.interval)
+
+    def _do_poll(self):
+        """执行一次轮询，更新 last_result 和 last_run。"""
+        config_path = Path(self.shared_dir) / BRIDGE_FILENAME
+        if not config_path.exists():
+            return self.last_result
+
+        try:
+            config = load_poll_config(str(config_path))
+            result = run_poll(config)
+        except Exception as e:
+            result = {"ok": False, "new_msgs": 0, "delivered": False,
+                      "archived": None, "error": str(e), "to_agent": ""}
+
+        with self._lock:
+            self.last_result = result
+            self.last_run = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return result
+
+    def get_status(self):
+        with self._lock:
+            return {
+                "running": self.is_running(),
+                "interval": self.interval,
+                "last_run": self.last_run,
+                "last_result": dict(self.last_result),
+            }
+
+
+# ─── HTTP Handler ─────────────────────────────────────
 
 class BridgeHandler(http.server.SimpleHTTPRequestHandler):
 
     shared_dir = None
+    poll_manager = None
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
-        get_routes = {
+        routes = {
             "/": lambda: self.serve_static("index.html"),
             "/api/config": self.handle_get_config,
             "/api/messages": lambda: self.handle_messages(parsed.query),
             "/api/status": self.handle_status,
+            "/api/poll": self.handle_poll_status,
         }
-        if path in get_routes:
-            get_routes[path]()
+        if path in routes:
+            routes[path]()
         elif path.startswith("/api/history/"):
             self.handle_history(path)
         else:
@@ -152,11 +226,14 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
-        post_routes = {
+        routes = {
             "/api/config": self.handle_update_config,
             "/api/archive": self.handle_archive,
+            "/api/poll/now": self.handle_poll_now,
+            "/api/poll/start": self.handle_poll_start,
+            "/api/poll/stop": self.handle_poll_stop,
         }
-        handler = post_routes.get(parsed.path)
+        handler = routes.get(parsed.path)
         if handler:
             handler()
         else:
@@ -164,7 +241,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
 
     do_PUT = do_POST
 
-    # ─── Static ──────────────────────────────────────
+    # ─── Static ─────────────────────────────────────
 
     def serve_static(self, filename):
         script_dir = Path(__file__).resolve().parent
@@ -194,7 +271,6 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
     def handle_get_config(self):
         shared = Path(self.shared_dir)
         cfg, _ = read_bridge(shared)
-
         agents_list = []
         for key, a in cfg.get("agents", {}).items():
             agents_list.append({
@@ -202,7 +278,6 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 "display_name": a.get("display_name", key.capitalize()),
                 "color": a.get("color", "#8888a0"),
             })
-
         self.send_json({
             "ok": True,
             "shared_dir": str(shared),
@@ -211,14 +286,13 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "active_exists": (shared / "active.jsonl").exists(),
         })
 
-    # ─── POST /api/config ────────────────────────────
+    # ─── POST /api/config ───────────────────────────
 
     def handle_update_config(self):
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
             self.send_json({"ok": False, "error": "empty body"})
             return
-
         try:
             body = json.loads(self.rfile.read(length))
         except json.JSONDecodeError:
@@ -230,17 +304,14 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         new_agents_input = body.get("agents", [])
         changes = []
 
-        # Validate all IDs first
-        errors = []
-        for item in new_agents_input:
-            new_id = item.get("id", "").strip()
-            if not validate_agent_id(new_id):
-                errors.append(f"invalid agent ID format: '{new_id}'")
+        # Validate IDs
+        errors = [f"invalid ID: '{a.get('id', '')}'"
+                  for a in new_agents_input
+                  if not validate_agent_id(a.get("id", "").strip())]
         if errors:
             self.send_json({"ok": False, "error": "; ".join(errors)})
             return
 
-        # Build old_id lookup
         old_lookup = {}
         for key, a in cfg.get("agents", {}).items():
             old_lookup[a["id"]] = (key, a)
@@ -258,7 +329,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 old_agent["id"] = new_id
                 cfg["agents"][new_id] = old_agent
                 cursor_moved = rename_cursor(shared, old_id, new_id)
-                changes.append(f"renamed: {old_id} → {new_id}" + (" (cursor migrated)" if cursor_moved else ""))
+                changes.append(f"renamed: {old_id} → {new_id}" + (" (cursor)" if cursor_moved else ""))
 
             target_key = None
             if old_id and old_id != new_id and old_id in old_lookup:
@@ -272,63 +343,73 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 agent = cfg["agents"][target_key]
                 if display_name:
                     agent["display_name"] = display_name
-                    changes.append(f"display: {display_name}")
                 if color and re.match(r'^#[0-9a-fA-F]{6}$', color):
                     agent["color"] = color
-                    changes.append("color updated")
 
         write_bridge(config_path, cfg)
-
-        agents_list = []
-        for key, a in cfg.get("agents", {}).items():
-            agents_list.append({
-                "id": a.get("id", key),
-                "display_name": a.get("display_name", key.capitalize()),
-                "color": a.get("color", "#8888a0"),
-            })
-
+        agents_list = [{"id": a["id"], "display_name": a.get("display_name", a["id"]),
+                        "color": a.get("color", "#8888a0")}
+                       for a in cfg["agents"].values()]
         self.send_json({"ok": True, "agents": agents_list, "changes": changes})
 
-    # ─── POST /api/archive ───────────────────────────
+    # ─── POST /api/archive ─────────────────────────
 
     def handle_archive(self):
         shared = Path(self.shared_dir)
-        active_file = shared / "active.jsonl"
-
-        if not active_file.exists():
+        active = shared / "active.jsonl"
+        if not active.exists():
             self.send_json({"ok": False, "error": "no active file"})
             return
-
-        msgs = parse_jsonl(active_file)
+        msgs = parse_jsonl(active)
         if not msgs:
             self.send_json({"ok": False, "error": "active file is empty"})
             return
-
-        history_dir = shared / "history"
-        history_dir.mkdir(parents=True, exist_ok=True)
-
+        history = shared / "history"
+        history.mkdir(parents=True, exist_ok=True)
         now = datetime.now().strftime("%Y-%m-%d_%H%M")
-        archive_name = f"{now}.jsonl"
-        archive_path = history_dir / archive_name
-
+        name = f"{now}.jsonl"
         try:
-            shutil.move(str(active_file), str(archive_path))
-            self.send_json({
-                "ok": True,
-                "archived_to": archive_name,
-                "message_count": len(msgs),
-            })
+            shutil.move(str(active), str(history / name))
+            self.send_json({"ok": True, "archived_to": name, "message_count": len(msgs)})
         except OSError as e:
             self.send_json({"ok": False, "error": str(e)})
 
-    # ─── GET /api/messages ───────────────────────────
+    # ─── Poll API ───────────────────────────────────
+
+    def handle_poll_status(self):
+        status = self.poll_manager.get_status() if self.poll_manager else {
+            "running": False, "interval": 0, "last_run": None, "last_result": {}
+        }
+        self.send_json({"ok": True, **status})
+
+    def handle_poll_now(self):
+        if not self.poll_manager:
+            self.send_json({"ok": False, "error": "poll manager not initialized"})
+            return
+        result = self.poll_manager.poll_now()
+        self.send_json({"ok": True, "result": result})
+
+    def handle_poll_start(self):
+        if not self.poll_manager:
+            self.send_json({"ok": False, "error": "poll manager not initialized"})
+            return
+        self.poll_manager.start()
+        self.send_json({"ok": True, "running": True})
+
+    def handle_poll_stop(self):
+        if not self.poll_manager:
+            self.send_json({"ok": False, "error": "poll manager not initialized"})
+            return
+        self.poll_manager.stop()
+        self.send_json({"ok": True, "running": False})
+
+    # ─── GET /api/messages ──────────────────────────
 
     def handle_messages(self, query):
         params = urllib.parse.parse_qs(query)
         archive = params.get("archive", [None])[0]
         search = params.get("q", [None])[0]
         limit = int(params.get("limit", [500])[0])
-
         shared = Path(self.shared_dir)
         all_msgs = []
 
@@ -351,14 +432,13 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         if search:
             q = search.lower()
             all_msgs = [m for m in all_msgs if q in m.get("msg", "").lower()]
-
         all_msgs.sort(key=lambda m: m.get("ts", ""))
         if limit and len(all_msgs) > limit:
             all_msgs = all_msgs[-limit:]
 
         self.send_json({"ok": True, "count": len(all_msgs), "messages": all_msgs})
 
-    # ─── GET /api/status ─────────────────────────────
+    # ─── GET /api/status ────────────────────────────
 
     def handle_status(self):
         shared = Path(self.shared_dir)
@@ -389,7 +469,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "history_count": len(history_files),
         })
 
-    # ─── GET /api/history/<name> ─────────────────────
+    # ─── GET /api/history/<name> ────────────────────
 
     def handle_history(self, path):
         filename = path.replace("/api/history/", "")
@@ -404,7 +484,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         msgs = parse_jsonl(filepath)
         self.send_json({"ok": True, "name": filename, "count": len(msgs), "messages": msgs})
 
-    # ─── Helper ──────────────────────────────────────
+    # ─── Helpers ──────────────────────────────────────
 
     def send_json(self, data):
         text = json.dumps(data, ensure_ascii=False)
@@ -417,17 +497,23 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         msg = fmt % args
-        if "GET /api/messages" in msg:
+        if "GET /api/messages" in msg or "GET /api/poll" in msg:
             return
         print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
 
+# ─── 启动 ─────────────────────────────────────────────
+
 def main():
-    parser = argparse.ArgumentParser(description="Agent Bridge — local UI server")
+    parser = argparse.ArgumentParser(description="Agent Bridge — UI + polling server")
     parser.add_argument("--dir", "-d", help="Shared chat directory (auto-detect)")
     parser.add_argument("--port", "-p", type=int, default=7899, help="Port (default: 7899)")
     parser.add_argument("--host", default="127.0.0.1", help="Bind (default: 127.0.0.1)")
     parser.add_argument("--open", "-o", action="store_true", help="Open browser")
+    parser.add_argument("--poll-interval", type=int, default=DEFAULT_POLL_INTERVAL,
+                        help=f"Poll interval in seconds (default: {DEFAULT_POLL_INTERVAL})")
+    parser.add_argument("--no-poll", action="store_true",
+                        help="Disable automatic polling (manual poll via API only)")
 
     args = parser.parse_args()
     shared_dir = args.dir or str(find_shared_dir())
@@ -435,18 +521,26 @@ def main():
 
     Path(shared_dir).mkdir(parents=True, exist_ok=True)
 
+    # 确保 bridge.yaml 存在
     cfg, cfg_path = read_bridge(Path(shared_dir))
     if not cfg_path.exists():
         write_bridge(cfg_path, cfg)
+
+    # 初始化后台轮询
+    poll_mgr = PollManager(shared_dir, args.poll_interval)
+    BridgeHandler.poll_manager = poll_mgr
+    if not args.no_poll:
+        poll_mgr.start()
 
     server = http.server.HTTPServer((args.host, args.port), BridgeHandler)
     url = f"http://{args.host}:{args.port}"
 
     print(f"╔══════════════════════════════════════════╗")
-    print(f"║   Agent Bridge · 本地 UI               ║")
+    print(f"║   Agent Bridge · UI + Poll              ║")
     print(f"║                                        ║")
     print(f"║   📁  {shared_dir:<33}║")
     print(f"║   🌐  {url:<33}║")
+    print(f"║   🔄  轮询: {'每 '+str(args.poll_interval)+'s' if not args.no_poll else '已关闭':<31}║")
     print(f"║                                        ║")
     print(f"║   点击 Agent Badge 编辑 ID/名称/颜色    ║")
     print(f"║   Ctrl+C 停止                          ║")
@@ -460,6 +554,7 @@ def main():
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nStopping...")
+        poll_mgr.stop()
         server.server_close()
 
 
