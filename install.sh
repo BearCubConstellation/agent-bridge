@@ -48,27 +48,14 @@ check_python() {
     ok "Python $VER ($PY)"
 }
 
-# ─── 检查 git ───
-check_git() {
-    if ! command -v git &>/dev/null; then
-        err "未找到 git"
-        echo "  请先安装 git"
-        exit 1
-    fi
-}
-
 # ─── 下载代码 ───
 download() {
-    if [ -d "$SRC_DIR/.git" ]; then
-        info "更新已有安装..."
-        cd "$SRC_DIR"
-        git fetch origin "$BRANCH" --quiet
-        git reset --hard "origin/$BRANCH" --quiet
-    else
-        info "克隆仓库..."
-        rm -rf "$SRC_DIR"
-        git clone --depth 1 --branch "$BRANCH" "https://github.com/$REPO.git" "$SRC_DIR" --quiet
-    fi
+    rm -rf "$SRC_DIR"
+    info "下载代码..."
+    # 直接用 curl 下载 tar.gz，不依赖 git
+    TARBALL_URL="https://github.com/$REPO/archive/refs/heads/$BRANCH.tar.gz"
+    curl -fsSL "$TARBALL_URL" | tar xz -C "$INSTALL_DIR" 2>/dev/null
+    mv "$INSTALL_DIR/agent-bridge-$BRANCH" "$SRC_DIR"
     ok "代码就绪: $SRC_DIR"
 }
 
@@ -135,7 +122,6 @@ echo "  ────────────────────────
 echo ""
 
 check_python
-check_git
 download
 install_cli
 print_done

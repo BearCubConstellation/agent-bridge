@@ -46,28 +46,17 @@ function Main {
     }
     Write-Ok "Python $ver ($($pyPath.Source))"
 
-    # 检查 git
-    $gitPath = $null
-    try { $gitPath = Get-Command git -ErrorAction Stop } catch {}
-    if (-not $gitPath) {
-        Write-Err "未找到 git"
-        Write-Host "  请先安装 git: https://git-scm.com/download/win"
-        return
-    }
-    Write-Ok "Git 已安装"
-
-    # 下载代码
-    if (Test-Path "$SrcDir\.git") {
-        Write-Info "更新已有安装..."
-        Push-Location $SrcDir
-        git fetch origin $Branch --quiet
-        git reset --hard "origin/$Branch" --quiet
-        Pop-Location
-    } else {
-        Write-Info "克隆仓库..."
-        if (Test-Path $SrcDir) { Remove-Item $SrcDir -Recurse -Force }
-        git clone --depth 1 --branch $Branch "https://github.com/$Repo.git" $SrcDir --quiet
-    }
+    # 下载代码（下载 zip 包，不需要 git）
+    Write-Info "下载代码..."
+    $zipUrl = "https://github.com/$Repo/archive/refs/heads/$Branch.zip"
+    $zipPath = "$env:TEMP\agent-bridge.zip"
+    Remove-Item -Path $SrcDir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $zipPath -ErrorAction SilentlyContinue
+    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+    Expand-Archive -Path $zipPath -DestinationPath $InstallDir -Force
+    Remove-Item -Path $zipPath -Force
+    $extracted = "$InstallDir\agent-bridge-$Branch"
+    Rename-Item -Path $extracted -NewName "src" -Force
     Write-Ok "代码就绪: $SrcDir"
 
     # 安装 bridge 命令
@@ -103,9 +92,9 @@ try {
 } catch {
     Write-Err "安装失败: $_"
     Write-Host ""
-    Write-Host "  请确认已安装:"
-    Write-Host "  - Python 3.8+ (https://www.python.org/downloads/)"
-    Write-Host "  - Git (https://git-scm.com/download/win)"
+    Write-Host "  请确认已安装 Python 3.8+:"
+    Write-Host "    https://www.python.org/downloads/"
+    Write-Host "  （安装时勾选 'Add Python to PATH'）"
     Write-Host ""
     Write-Host "  安装后重启终端，重新运行安装命令。"
 }

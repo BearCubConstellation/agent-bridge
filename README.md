@@ -35,20 +35,15 @@
 
 ## 安装前提
 
-- **Python 3.8+**
-- **Git**（仅一键安装需要，安装后不再依赖）
+- **Python 3.8+**（安装后重启终端）
 
 检查：
 
 ```bash
-python3 --version && git --version
+python3 --version
 ```
 
-Windows 用户请从官网安装：
-- Python: https://www.python.org/downloads/（勾选 **Add Python to PATH**）
-- Git: https://git-scm.com/download/win
-
-安装后重启终端，再执行安装命令。
+Windows 用户：https://www.python.org/downloads/（勾选 **Add Python to PATH**）
 
 ## 快速开始
 
