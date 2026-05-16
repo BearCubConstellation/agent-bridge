@@ -62,8 +62,10 @@ curl -fsSL https://raw.githubusercontent.com/SusuAgent/agent-bridge/main/install
 
 **Windows (PowerShell):**
 
+打开 PowerShell，运行：
+
 ```powershell
-powershell -c "irm https://raw.githubusercontent.com/SusuAgent/agent-bridge/main/install.ps1 | iex"
+irm https://raw.githubusercontent.com/SusuAgent/agent-bridge/main/install.ps1 | iex
 ```
 
 ### 初始化
