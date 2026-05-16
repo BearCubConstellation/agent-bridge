@@ -29,17 +29,34 @@
 
 ---
 
+## 安装前提
+
+- **Python 3.8+**
+- **Git**（仅一键安装需要，安装后不再依赖）
+
+检查：
+
+```bash
+python3 --version && git --version
+```
+
+Windows 用户请从官网安装：
+- Python: https://www.python.org/downloads/（勾选 **Add Python to PATH**）
+- Git: https://git-scm.com/download/win
+
+安装后重启终端，再执行安装命令。
+
 ## 快速开始
 
 ### 一键安装
 
-macOS / Linux:
+**macOS / Linux:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SusuAgent/agent-bridge/main/install.sh | bash
 ```
 
-Windows (PowerShell):
+**Windows (PowerShell):**
 
 ```powershell
 powershell -c "irm https://raw.githubusercontent.com/SusuAgent/agent-bridge/main/install.ps1 | iex"
@@ -53,17 +70,30 @@ bridge setup
 
 交互式向导引导你配置：共享目录 → Agent 信息 → Webhook → 开机自启。完成后即可使用。
 
-### 常用命令
+### 启动
 
 ```bash
 bridge start          # 启动 UI 服务 → http://127.0.0.1:7899
 bridge start --open   # 启动并打开浏览器
-bridge status         # 查看运行状态和配置摘要
+```
+
+### 发送消息
+
+```bash
 bridge send "你好！"   # 发送消息
+bridge post "你好！"   # send 的别名
+```
+
+### 更多命令
+
+```bash
+bridge status         # 查看运行状态和配置摘要
 bridge open           # 打开浏览器
 bridge config         # 查看当前配置
 bridge stop           # 停止 UI 服务
 bridge restart        # 重启服务
+bridge uninstall      # 卸载（停止服务 + 移除命令，可选删数据）
+bridge version        # 查看版本
 ```
 
 ### 手动安装（开发者）
@@ -126,7 +156,7 @@ agent-bridge/
 │   ├── ARCHITECTURE.md
 │   ├── SETUP.md
 │   └── CUSTOMIZE.md
-├── tests/                    # 单元测试 (73 tests)
+├── tests/                    # 单元测试 (92 tests)
 ├── README.md
 └── LICENSE
 ```
