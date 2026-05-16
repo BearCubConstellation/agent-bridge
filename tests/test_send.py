@@ -109,7 +109,8 @@ class TestSend(unittest.TestCase):
         self.assertEqual(msg["msg"], "你好世界 🌍")
 
     def test_send_invalid_agent_id_exits(self):
-        with self.assertRaises(SystemExit):
+        from send import InvalidAgentError
+        with self.assertRaises(InvalidAgentError):
             send("invalid id!", self.active_file, "test")
 
 

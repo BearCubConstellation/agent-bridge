@@ -158,6 +158,8 @@ class PollManager:
     def stop(self):
         self._stop.set()
         self.running = False
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=5)
 
     def poll_now(self):
         """立即触发一次轮询（同步执行）。"""
@@ -307,14 +309,9 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
     # ─── POST /api/config ───────────────────────────
 
     def handle_update_config(self):
-        length = int(self.headers.get("Content-Length", 0))
-        if length == 0:
-            self.send_json({"ok": False, "error": "empty body"})
-            return
-        try:
-            body = json.loads(self.rfile.read(length))
-        except json.JSONDecodeError:
-            self.send_json({"ok": False, "error": "invalid JSON"})
+        body, err = self._read_json_body()
+        if err:
+            self.send_json(err)
             return
 
         shared = Path(self.shared_dir)
@@ -373,14 +370,9 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
     # ─── PUT /api/config/full ───────────────────────
 
     def handle_update_config_full(self):
-        length = int(self.headers.get("Content-Length", 0))
-        if length == 0:
-            self.send_json({"ok": False, "error": "empty body"})
-            return
-        try:
-            body = json.loads(self.rfile.read(length))
-        except json.JSONDecodeError:
-            self.send_json({"ok": False, "error": "invalid JSON"})
+        body, err = self._read_json_body()
+        if err:
+            self.send_json(err)
             return
 
         shared = Path(self.shared_dir)
@@ -459,11 +451,19 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             return
         history = shared / "history"
         history.mkdir(parents=True, exist_ok=True)
-        now = datetime.now().strftime("%Y-%m-%d_%H%M")
+        now = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         name = f"{now}.jsonl"
         try:
+            # Acquire both locks: .active.lock prevents concurrent writes,
+            # .archive.lock prevents concurrent archive operations
             with file_lock(shared / ".archive.lock"):
-                shutil.move(str(active), str(history / name))
+                with file_lock(shared / ".active.lock"):
+                    if not active.exists():
+                        self.send_json({"ok": False, "error": "active file disappeared"})
+                        return
+                    shutil.move(str(active), str(history / name))
+                    # 创建新的空 active.jsonl，避免存在性检查空窗
+                    active.touch()
             self.send_json({"ok": True, "archived_to": name, "message_count": len(msgs)})
         except OSError as e:
             self.send_json({"ok": False, "error": str(e)})
@@ -513,14 +513,9 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json({"ok": True, "history": history})
 
     def handle_send_message(self):
-        length = int(self.headers.get("Content-Length", 0))
-        if length == 0:
-            self.send_json({"ok": False, "error": "empty body"})
-            return
-        try:
-            body = json.loads(self.rfile.read(length))
-        except json.JSONDecodeError:
-            self.send_json({"ok": False, "error": "invalid JSON"})
+        body, err = self._read_json_body()
+        if err:
+            self.send_json(err)
             return
 
         agent_id = body.get("agent_id", "")
@@ -574,7 +569,11 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             all_msgs.append(m)
 
         if archive:
-            for m in parse_jsonl(shared / "history" / archive):
+            archive_path = (shared / "history" / archive).resolve()
+            if not archive_path.is_relative_to((shared / "history").resolve()):
+                self.send_json({"ok": False, "error": "invalid archive name"})
+                return
+            for m in parse_jsonl(archive_path):
                 m["_source"] = archive
                 all_msgs.append(m)
         else:
@@ -632,10 +631,10 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         if not filename.endswith(".jsonl"):
             self.send_error(400, "Only .jsonl files")
             return
-        # 防止路径遍历
+        # 防止路径遍历：使用 is_relative_to 替代字符串前缀匹配
         shared = Path(self.shared_dir)
         filepath = (shared / "history" / filename).resolve()
-        if not str(filepath).startswith(str((shared / "history").resolve())):
+        if not filepath.is_relative_to((shared / "history").resolve()):
             self.send_error(403)
             return
         if not filepath.exists():
@@ -645,6 +644,20 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json({"ok": True, "name": filename, "count": len(msgs), "messages": msgs})
 
     # ─── Helpers ──────────────────────────────────────
+
+    MAX_BODY_SIZE = 10 * 1024 * 1024  # 10MB
+
+    def _read_json_body(self):
+        """Read and parse JSON body with size limit. Returns (body, error_response)."""
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0:
+            return None, {"ok": False, "error": "empty body"}
+        if length > self.MAX_BODY_SIZE:
+            return None, {"ok": False, "error": "request body too large"}
+        try:
+            return json.loads(self.rfile.read(length)), None
+        except json.JSONDecodeError:
+            return None, {"ok": False, "error": "invalid JSON"}
 
     def send_json(self, data):
         text = json.dumps(data, ensure_ascii=False)

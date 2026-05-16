@@ -72,12 +72,17 @@ def validate_agent_id(aid):
     return True
 
 
+class InvalidAgentError(ValueError):
+    """Raised when agent ID validation fails."""
+    pass
+
+
 def send(agent_id, active_file, text, quiet=False):
     """向 active.jsonl 追加一条消息。"""
     if not validate_agent_id(agent_id):
-        print(f"Error: invalid agent ID '{agent_id}'. Use only letters, numbers, hyphens, underscores.",
-              file=sys.stderr)
-        sys.exit(1)
+        raise InvalidAgentError(
+            f"Invalid agent ID '{agent_id}'. Use only letters, numbers, hyphens, underscores."
+        )
 
     active_file.parent.mkdir(parents=True, exist_ok=True)
     msg = {

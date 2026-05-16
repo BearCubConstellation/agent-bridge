@@ -565,6 +565,109 @@ def cmd_version(args):
     print(f"  Agent Bridge v{VERSION}")
 
 
+def cmd_uninstall(args):
+    """卸载 Agent Bridge。"""
+    print()
+    print("  \033[1mAgent Bridge 卸载程序\033[0m")
+    print("  " + "─" * 36)
+    print()
+
+    # 1. 停止 UI 服务
+    print("  1/4 停止服务...")
+    if _is_running():
+        cmd_stop(args)
+        _print_ok("服务已停止")
+    else:
+        _print_info("服务未运行")
+    print()
+
+    # 2. 卸载系统服务
+    print("  2/4 卸载系统定时服务...")
+    uninstalled_any = False
+
+    if sys.platform == "darwin":
+        label = "com.agent-bridge.poll"
+        plist_dir = Path.home() / "Library" / "LaunchAgents"
+        plist_path = plist_dir / f"{label}.plist"
+        if plist_path.exists():
+            subprocess.run(["launchctl", "unload", str(plist_path)],
+                           capture_output=True)
+            plist_path.unlink()
+            _print_ok(f"已卸载 launchd: {plist_path.name}")
+            uninstalled_any = True
+
+    elif sys.platform.startswith("linux"):
+        service_name = "agent-bridge-poll"
+        service_dir = Path.home() / ".config" / "systemd" / "user"
+        for f in [f"{service_name}.service", f"{service_name}.timer"]:
+            p = service_dir / f
+            if p.exists():
+                subprocess.run(["systemctl", "--user", "disable", f],
+                               capture_output=True)
+                p.unlink()
+                _print_ok(f"已卸载 systemd: {f}")
+                uninstalled_any = True
+        if uninstalled_any:
+            subprocess.run(["systemctl", "--user", "daemon-reload"],
+                           capture_output=True)
+
+    if not uninstalled_any:
+        _print_info("未发现系统定时服务")
+    print()
+
+    # 3. 移除 bridge 命令
+    print("  3/4 移除 bridge 命令...")
+    bin_dir = Path.home() / ".local" / "bin"
+    bridge_bin = bin_dir / "bridge"
+    if bridge_bin.exists():
+        bridge_bin.unlink()
+        _print_ok(f"已删除: {bridge_bin}")
+    else:
+        _print_info("未找到 bridge 命令")
+    print()
+
+    # 4. 询问是否删除共享目录
+    shared_dir = _shared_dir()
+    shared_dir_str = str(shared_dir)
+    print("  4/4 数据清理...")
+    print(f"  共享目录: {shared_dir_str}")
+    print(f"  源文件目录: {PROJECT_ROOT}")
+    print()
+
+    if args.force:
+        remove_data = True
+    else:
+        try:
+            reply = input("  删除所有数据（配置 + 消息 + 源码）？[y/N]: ").strip().lower()
+            remove_data = reply in ("y", "yes", "是")
+        except (EOFError, KeyboardInterrupt):
+            remove_data = False
+
+    if remove_data:
+        cmd_stop(args)
+        if shared_dir.exists():
+            import shutil
+            shutil.rmtree(str(shared_dir))
+            _print_ok(f"已删除: {shared_dir_str}")
+    else:
+        print(f"  源码保留在: {PROJECT_ROOT}")
+        print(f"  配置保留在: {shared_dir_str}")
+        if shared_dir.exists() and (shared_dir / "active.jsonl").exists():
+            print(f"  消息文件: {shared_dir / 'active.jsonl'}")
+        print("  如需完整删除，手动执行:")
+        print(f"    rm -rf {PROJECT_ROOT}")
+        print(f"    rm -rf {shared_dir_str}")
+    print()
+
+    # 完成
+    print("  " + "─" * 36)
+    _print_ok("卸载完成！")
+    print()
+    if not remove_data:
+        print("  数据已保留，可随时重新安装使用。")
+        print()
+
+
 # ═══ 主入口 ═══
 
 def main():
@@ -592,8 +695,12 @@ def main():
     # status
     p = sub.add_parser("status", help="查看运行状态")
 
-    # send
+    # send / post
     p = sub.add_parser("send", help="发送消息")
+    p.add_argument("message", nargs="?", help="消息内容（也可通过管道输入）")
+    p.add_argument("--agent", "-a", help="指定发送者 Agent ID")
+
+    p = sub.add_parser("post", help="发送消息（send 的别名）")
     p.add_argument("message", nargs="?", help="消息内容（也可通过管道输入）")
     p.add_argument("--agent", "-a", help="指定发送者 Agent ID")
 
@@ -607,6 +714,11 @@ def main():
     # version
     p = sub.add_parser("version", help="查看版本")
 
+    # uninstall
+    p = sub.add_parser("uninstall", help="卸载 Agent Bridge")
+    p.add_argument("--force", "-f", action="store_true",
+                   help="跳过确认，直接卸载")
+
     args = parser.parse_args()
 
     commands = {
@@ -616,9 +728,11 @@ def main():
         "restart": cmd_restart,
         "status": cmd_status,
         "send": cmd_send,
+        "post": cmd_send,
         "open": cmd_open,
         "config": cmd_config,
         "version": cmd_version,
+        "uninstall": cmd_uninstall,
     }
 
     if args.command in commands:

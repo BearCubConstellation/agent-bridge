@@ -98,6 +98,8 @@ def wakeup_agent(wakeup_cfg, message_text, from_agent):
     url = wakeup_cfg.get("url", "")
     if not url:
         return (False, "wakeup URL is empty")
+    if not url.startswith(("http://", "https://")):
+        return (False, f"unsupported URL scheme: {url}")
 
     body = build_body(wakeup_cfg.get("body_template", {}), message_text, from_agent)
     headers = dict(wakeup_cfg.get("headers", {}))
@@ -205,29 +207,39 @@ def do_archive(shared_dir):
     if not active_file.exists():
         return None
 
-    # Use a separate lock file to prevent race conditions between agents
-    lock_path = shared_dir / ".archive.lock"
+    # Acquire BOTH locks to prevent race conditions:
+    # .active.lock prevents concurrent writes to active.jsonl
+    # .archive.lock prevents concurrent archive operations
+    active_lock_path = shared_dir / ".active.lock"
+    archive_lock_path = shared_dir / ".archive.lock"
     shared_dir.mkdir(parents=True, exist_ok=True)
 
-    with open(lock_path, "w") as lockf:
-        lock_file(lockf)
+    with open(archive_lock_path, "w") as arch_lockf:
+        lock_file(arch_lockf)
         try:
-            # Re-check after acquiring lock — another agent may have archived
-            if not active_file.exists():
-                return None
+            with open(active_lock_path, "w") as act_lockf:
+                lock_file(act_lockf)
+                try:
+                    # Re-check after acquiring lock — another agent may have archived
+                    if not active_file.exists():
+                        return None
 
-            history_dir = shared_dir / "history"
-            history_dir.mkdir(parents=True, exist_ok=True)
-            now = datetime.now().strftime("%Y-%m-%d_%H%M")
-            archive_name = f"{now}.jsonl"
-            archive_path = history_dir / archive_name
-            try:
-                shutil.move(str(active_file), str(archive_path))
-                return archive_name
-            except OSError:
-                return None
+                    history_dir = shared_dir / "history"
+                    history_dir.mkdir(parents=True, exist_ok=True)
+                    now = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+                    archive_name = f"{now}.jsonl"
+                    archive_path = history_dir / archive_name
+                    try:
+                        shutil.move(str(active_file), str(archive_path))
+                        # 创建新的空 active.jsonl，避免存在性检查空窗
+                        active_file.touch()
+                        return archive_name
+                    except OSError:
+                        return None
+                finally:
+                    unlock_file(act_lockf)
         finally:
-            unlock_file(lockf)
+            unlock_file(arch_lockf)
 
 
 # ─── 核心轮询（可导入） ──────────────────────────────
@@ -281,15 +293,16 @@ def run_poll(config):
         result["ok"] = True
         result["archived"] = name
         result["error"] = "" if name else "archive failed"
-        # 归档后重置所有 agent 的行号游标（新 active.jsonl 是空的）
+        # 归档后重置所有 agent 的游标（新 active.jsonl 是空的）
         if name:
             agents = config.get("agents", {})
-            my_id = config.get("agent_id", "")
             for aid, acfg in agents.items():
                 ctype = acfg.get("cursor", "line")
+                cf = get_cursor_file(shared_dir, aid, ctype)
                 if ctype == "line":
-                    cf = get_cursor_file(shared_dir, aid, ctype)
                     write_cursor(cf, ctype, 0)
+                else:
+                    write_cursor(cf, ctype, None)
         return result
 
     # ── 消息检查 ──
