@@ -54,11 +54,18 @@ function Main {
     try {
         Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
     } catch {
-        Write-Err "Failed to download source"
-        Write-Host "    Could not reach github.com. Check:"
-        Write-Host "    - Internet connection"
-        Write-Host "    - Firewall / proxy settings"
-        Write-Host "    - DNS resolution"
+        Write-Err "Cannot continue —unable to download source code from GitHub"
+        Write-Host "    URL: $zipUrl"
+        Write-Host ""
+        Write-Host "    Make sure this VM has internet access and can reach github.com."
+        Write-Host ""
+        Write-Host "    Common fixes:"
+        Write-Host "    - Check VM network settings (NAT / Bridged)"
+        Write-Host "    - If behind a proxy, set environment variables first:"
+        Write-Host "        `$env:HTTP_PROXY=`"http://proxy-address:port`""
+        Write-Host "        `$env:HTTPS_PROXY=`"http://proxy-address:port`""
+        Write-Host "    - Try pinging github.com to verify connectivity"
+        Write-Host "    - Disable VPN / firewall temporarily"
         return
     }
     Expand-Archive -Path $zipPath -DestinationPath $InstallDir -Force
