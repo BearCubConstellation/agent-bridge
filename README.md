@@ -60,12 +60,18 @@ Windows 用户请从官网安装：
 curl -fsSL https://raw.githubusercontent.com/SusuAgent/agent-bridge/main/install.sh | bash
 ```
 
-**Windows (PowerShell):**
+**Windows:**
 
-打开 PowerShell，运行：
+在 **PowerShell** 中运行：
 
 ```powershell
 irm https://raw.githubusercontent.com/SusuAgent/agent-bridge/main/install.ps1 | iex
+```
+
+在 **cmd** 中运行：
+
+```cmd
+powershell -c "irm https://raw.githubusercontent.com/SusuAgent/agent-bridge/main/install.ps1 | iex"
 ```
 
 ### 初始化
