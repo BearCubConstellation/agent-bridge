@@ -3,8 +3,7 @@
 Agent Bridge — 命令行工具
 
 用法:
-    bridge setup          # 交互式配置向导
-    bridge start          # 启动 UI 服务
+    bridge start          # 启动 UI 服务并打开浏览器
     bridge stop           # 停止 UI 服务
     bridge restart        # 重启 UI 服务
     bridge status         # 查看运行状态
@@ -17,7 +16,6 @@ import argparse
 import json
 import os
 import platform
-import re
 import subprocess
 import sys
 import webbrowser
@@ -143,269 +141,25 @@ def _print_info(msg):
     print(f"  \033[36mINFO\033[0m {msg}")
 
 
-def _ask(prompt, default=""):
-    hint = f" [{default}]" if default else ""
-    val = input(f"  {prompt}{hint}: ").strip()
-    return val if val else default
-
-
-def _ask_yn(prompt, default=True):
-    hint = "Y/n" if default else "y/N"
-    val = input(f"  {prompt} [{hint}]: ").strip().lower()
-    if not val:
-        return default
-    return val in ("y", "yes", "是")
-
-
-def _ask_choice(prompt, choices, default=0):
-    """选择列表中的一个选项，返回索引。"""
-    for i, c in enumerate(choices):
-        marker = " ->" if i == default else "   "
-        print(f"{marker} {i + 1}. {c}")
-    val = input(f"  {prompt} [{default + 1}]: ").strip()
-    if not val:
-        return default
-    try:
-        idx = int(val) - 1
-        if 0 <= idx < len(choices):
-            return idx
-    except ValueError:
-        pass
-    return default
-
-
-def _write_config(config, path=None):
-    """写入配置文件。"""
-    path = path or _find_config()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        import yaml
-        with open(path, "w", encoding="utf-8") as f:
-            yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-    except ImportError:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
-    return path
-
-
 # ═══ 子命令 ═══
-
-def cmd_setup(args):
-    """交互式配置向导。"""
-    print()
-    print("  \033[1mAgent Bridge 配置向导\033[0m")
-    print("  " + "-" * 36)
-    print()
-
-    config = _load_config()
-    shared = config.get("shared_dir", "")
-
-    # 1. 共享目录
-    print("  \033[1m[1/4] 共享目录\033[0m")
-    print("  消息文件存放的目录，两台机器共享时需确保路径一致。")
-    current_dir = shared or str(DEFAULT_SHARED_DIR)
-    shared = _ask("共享目录路径", current_dir)
-    shared_path = Path(os.path.expanduser(shared))
-    shared_path.mkdir(parents=True, exist_ok=True)
-    config["shared_dir"] = str(shared_path)
-    _print_ok(f"目录就绪: {shared_path}")
-    print()
-
-    # 2. Agent 配置
-    print("  \033[1m[2/4] Agent 配置\033[0m")
-    print("  配置参与对话的 Agent（至少 2 个）。")
-    existing_agents = config.get("agents", {})
-    if not isinstance(existing_agents, dict):
-        existing_agents = {}
-
-    agents = {}
-    default_colors = ["#ff6b6b", "#4ecdc4", "#ffd93d", "#a29bfe", "#fd79a8", "#00cec9"]
-
-    if existing_agents:
-        print("  已有 Agent 配置：")
-        for aid, a in existing_agents.items():
-            print(f"    - {a.get('display_name', aid)} (ID: {aid})")
-        if _ask_yn("保留已有配置？", default=True):
-            agents = dict(existing_agents)
-
-    if not agents:
-        # 引导创建两个 agent
-        for i in range(2):
-            print(f"\n  \033[1m--- Agent {i + 1} ---\033[0m")
-            aid = ""
-            while not aid or not re.match(r'^[a-zA-Z0-9_-]+$', aid):
-                aid = _ask(f"Agent ID（字母/数字/下划线/连字符）",
-                           ["momo", "susu"][i] if i < 2 else "")
-                if not re.match(r'^[a-zA-Z0-9_-]+$', aid):
-                    _print_err("ID 只能包含字母、数字、下划线、连字符")
-
-            name = _ask("显示名称", aid.capitalize())
-            color = default_colors[i % len(default_colors)]
-            filter_from = _ask("只接收来自谁的来信（对方 Agent ID，留空接收全部）", "")
-
-            print("  Webhook URL（对方收到消息后的唤醒地址，留空暂不配置）")
-            print("  示例: http://127.0.0.1:8644/webhooks/reply")
-            wu_url = _ask("Webhook URL", "")
-
-            agents[aid] = {
-                "id": aid,
-                "display_name": name,
-                "color": color,
-                "cursor": "line",
-                "filter_from": filter_from,
-                "wakeup": {
-                    "url": wu_url,
-                    "method": "POST",
-                    "headers": {"Content-Type": "application/json"},
-                    "body_template": {"message": "{{message}}"},
-                },
-            }
-            _print_ok(f"Agent '{name}' 已配置")
-
-    config["agents"] = agents
-
-    # 3. 本机角色
-    print()
-    print("  \033[1m[3/4] 本机角色\033[0m")
-    agent_ids = list(agents.keys())
-    if len(agent_ids) > 1:
-        print("  选择本机代表哪个 Agent 运行轮询：")
-        idx = _ask_choice("选择 Agent",
-                          [f"{agents[a].get('display_name', a)} ({a})" for a in agent_ids])
-        config["agent_id"] = agent_ids[idx]
-    elif len(agent_ids) == 1:
-        config["agent_id"] = agent_ids[0]
-    else:
-        config["agent_id"] = ""
-    print()
-
-    # 4. 开机自启
-    print("  \033[1m[4/4] 开机自启\033[0m")
-    auto_start = False
-    if sys.platform == "darwin":
-        auto_start = _ask_yn("是否配置 launchd 开机自动启动轮询？", default=False)
-    elif sys.platform.startswith("linux"):
-        auto_start = _ask_yn("是否配置 systemd timer 自动轮询？", default=False)
-
-    # 保存配置
-    config_path = shared_path / "bridge.yaml"
-    _write_config(config, config_path)
-    _print_ok(f"配置已保存: {config_path}")
-    print()
-
-    # 安装自启服务
-    if auto_start:
-        _install_service(config)
-
-    # 完成
-    print("  " + "-" * 36)
-    _print_ok("配置完成！")
-    print()
-    print(f"  启动 UI:  \033[36mbridge start\033[0m")
-    print(f"  发送消息: \033[36mbridge send \"你好\"\033[0m")
-    print(f"  查看状态: \033[36mbridge status\033[0m")
-    print()
-
-
-def _install_service(config):
-    """安装系统自启服务。"""
-    shared_dir = Path(os.path.expanduser(config.get("shared_dir", "")))
-    my_id = config.get("agent_id", "")
-    if not my_id:
-        _print_err("未设置 agent_id，跳过服务安装")
-        return
-
-    if sys.platform == "darwin":
-        _install_launchd(shared_dir, my_id)
-    elif sys.platform.startswith("linux"):
-        _install_systemd(shared_dir, my_id)
-
-
-def _install_launchd(shared_dir, agent_id):
-    """安装 macOS launchd plist。"""
-    label = "com.agent-bridge.poll"
-    plist_dir = Path.home() / "Library" / "LaunchAgents"
-    plist_dir.mkdir(parents=True, exist_ok=True)
-    plist_path = plist_dir / f"{label}.plist"
-
-    poll_script = PROJECT_ROOT / "core" / "poll.py"
-    config_path = shared_dir / "bridge.yaml"
-
-    plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>{label}</string>
-    <key>ProgramArguments</key><array>
-        <string>{sys.executable}</string>
-        <string>{poll_script}</string>
-        <string>--config</string><string>{config_path}</string>
-        <string>--agent</string><string>{agent_id}</string>
-    </array>
-    <key>StartInterval</key><integer>180</integer>
-    <key>RunAtLoad</key><true/>
-    <key>StandardOutPath</key><string>{shared_dir}/.poll.log</string>
-    <key>StandardErrorPath</key><string>{shared_dir}/.poll-err.log</string>
-</dict>
-</plist>"""
-
-    plist_path.write_text(plist_content, encoding="utf-8")
-    subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
-    subprocess.run(["launchctl", "load", str(plist_path)], capture_output=True)
-    _print_ok(f"launchd 服务已安装: {plist_path.name}")
-
-
-def _install_systemd(shared_dir, agent_id):
-    """安装 Linux systemd user service。"""
-    service_name = "agent-bridge-poll"
-    service_dir = Path.home() / ".config" / "systemd" / "user"
-    service_dir.mkdir(parents=True, exist_ok=True)
-    service_path = service_dir / f"{service_name}.service"
-    timer_path = service_dir / f"{service_name}.timer"
-
-    poll_script = PROJECT_ROOT / "core" / "poll.py"
-    config_path = shared_dir / "bridge.yaml"
-
-    service_content = f"""[Unit]
-Description=Agent Bridge Poll
-After=network.target
-
-[Service]
-Type=oneshot
-ExecStart={sys.executable} {poll_script} --config {config_path} --agent {agent_id}
-"""
-
-    timer_content = f"""[Unit]
-Description=Agent Bridge Poll Timer
-
-[Timer]
-OnBootSec=1min
-OnUnitActiveSec=3min
-
-[Install]
-WantedBy=timers.target
-"""
-
-    service_path.write_text(service_content, encoding="utf-8")
-    timer_path.write_text(timer_content, encoding="utf-8")
-    subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
-    subprocess.run(["systemctl", "--user", "enable", f"{service_name}.timer"], capture_output=True)
-    subprocess.run(["systemctl", "--user", "start", f"{service_name}.timer"], capture_output=True)
-    _print_ok(f"systemd timer 已安装: {service_name}.timer")
-
 
 def cmd_start(args):
     """启动 UI 服务。"""
+    port = args.port or 7899
+    host = args.host or "127.0.0.1"
+    url = f"http://{host}:{port}"
+    no_open = getattr(args, "no_open", False)
     if _is_running():
         pid = _read_pid()
         _print_info(f"服务已在运行 (PID {pid})")
+        if not no_open:
+            webbrowser.open(url)
         return
 
     shared_dir = _shared_dir()
     shared_dir.mkdir(parents=True, exist_ok=True)
 
     cmd = _server_cmd()
-    port = args.port or 7899
     cmd.extend(["--port", str(port)])
     if args.host:
         cmd.extend(["--host", args.host])
@@ -423,12 +177,12 @@ def cmd_start(args):
     PID_FILE.write_text(str(proc.pid), encoding="utf-8")
 
     _print_ok(f"服务已启动 (PID {proc.pid})")
-    _print_info(f"地址: http://127.0.0.1:{port}")
+    _print_info(f"地址: {url}")
 
-    if args.open:
+    if not no_open:
         import time
         time.sleep(1)
-        webbrowser.open(f"http://127.0.0.1:{port}")
+        webbrowser.open(url)
 
 
 def cmd_stop(args):
@@ -531,7 +285,7 @@ def cmd_send(args):
             print(f"  可选: {', '.join(agents.keys())}")
             sys.exit(1)
         else:
-            _print_err("未找到 Agent 配置，请先运行 bridge setup")
+            _print_err("未找到 Agent 配置，请先运行 bridge start 并在 WebUI 中完成配置")
             sys.exit(1)
 
     if not validate_agent_id(agent_id):
@@ -566,7 +320,7 @@ def cmd_config(args):
     config_path = _find_config()
     if not config_path.exists():
         _print_err(f"配置文件不存在: {config_path}")
-        _print_info("请先运行 bridge setup")
+        _print_info("请先运行 bridge start，服务会自动生成默认配置")
         return
 
     print(f"  配置文件: {config_path}")
@@ -693,14 +447,11 @@ def main():
     )
     sub = parser.add_subparsers(dest="command", help="可用命令")
 
-    # setup
-    p = sub.add_parser("setup", help="交互式配置向导")
-
     # start
-    p = sub.add_parser("start", help="启动 UI 服务")
+    p = sub.add_parser("start", help="启动 UI 服务并打开浏览器")
     p.add_argument("--port", "-p", type=int, help="端口 (默认 7899)")
     p.add_argument("--host", help="绑定地址 (默认 127.0.0.1)")
-    p.add_argument("--open", "-o", action="store_true", help="启动后打开浏览器")
+    p.add_argument("--no-open", action="store_true", help="启动后不自动打开浏览器")
 
     # stop
     p = sub.add_parser("stop", help="停止 UI 服务")
@@ -738,7 +489,6 @@ def main():
     args = parser.parse_args()
 
     commands = {
-        "setup": cmd_setup,
         "start": cmd_start,
         "stop": cmd_stop,
         "restart": cmd_restart,

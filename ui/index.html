@@ -150,6 +150,23 @@ body {
 .tab-btn:hover { color: var(--text2); }
 .tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
 
+.config-banner {
+  display: none; background: rgba(255,217,61,0.08); border-bottom: 1px solid rgba(255,217,61,0.18);
+  padding: 10px 20px; color: var(--amber); font-size: 0.82em;
+}
+.config-banner.show { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.config-banner button {
+  background: rgba(255,217,61,0.12); border: 1px solid rgba(255,217,61,0.35);
+  color: var(--amber); border-radius: var(--radius-sm); padding: 5px 10px; cursor: pointer;
+}
+.config-checklist {
+  background: rgba(255,217,61,0.06); border: 1px solid rgba(255,217,61,0.22);
+  border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; color: var(--text2);
+  font-size: 0.82em;
+}
+.config-checklist-title { color: var(--amber); font-weight: 600; margin-bottom: 6px; }
+.config-checklist div { margin: 3px 0; }
+
 /* ═══ Compose bar ═══ */
 .compose-bar {
   padding: 8px 20px;
@@ -489,6 +506,8 @@ body {
   <button class="tab-btn" data-tab="settings">⚙ 设置</button>
 </div>
 
+<div class="config-banner" id="configBanner"></div>
+
 <div class="compose-bar">
   <select id="composeAgent"></select>
   <input type="text" id="composeInput" placeholder="输入消息，按 Enter 发送…" />
@@ -585,6 +604,7 @@ const pollDot = $('#pollDot');
 const pollLabel = $('#pollLabel');
 const pollBtn = $('#pollBtn');
 const activityArea = $('#activityArea');
+const configBanner = $('#configBanner');
 
 // ═══ API ═══
 async function apiGet(p) { try { const r = await fetch(p); return await r.json(); } catch(e) { return null; } }
@@ -613,6 +633,40 @@ async function loadConfig() {
   renderBadges();
   renderCards();
   renderComposeSelect();
+  renderConfigBanner(data);
+}
+
+function getConfigIssues(data) {
+  const agents = data.agents || [];
+  const ids = new Set(agents.map(a => a.id).filter(Boolean));
+  const issues = [];
+  if (!data.shared_dir) issues.push('共享目录未设置');
+  if (!agents.length) issues.push('至少添加一个 Agent');
+  if (!data.agent_id) issues.push('选择本机角色');
+  else if (!ids.has(data.agent_id)) issues.push(`本机角色 ${data.agent_id} 不在 Agent 列表中`);
+  for (const a of agents) {
+    const name = a.display_name || a.id || '未命名 Agent';
+    if (!a.id) issues.push(`${name}: Agent ID 不能为空`);
+    if (!a.wakeup || !a.wakeup.url) issues.push(`${name}: 填写 Webhook URL`);
+    if (!a.wakeup || !a.wakeup.body_template) issues.push(`${name}: 确认消息体模板`);
+  }
+  return issues;
+}
+
+function renderConfigBanner(data) {
+  const issues = getConfigIssues(data);
+  if (!issues.length) {
+    configBanner.className = 'config-banner';
+    configBanner.innerHTML = '';
+    return;
+  }
+  configBanner.className = 'config-banner show';
+  configBanner.innerHTML = `<span>还需要完成 ${issues.length} 个配置项：${esc(issues.slice(0, 2).join('；'))}${issues.length > 2 ? '…' : ''}</span><button onclick="switchToSettings()">去配置</button>`;
+}
+
+function switchToSettings() {
+  const btn = document.querySelector('.tab-btn[data-tab="settings"]');
+  if (btn) btn.click();
 }
 
 // ═══ Badges (header) ═══
@@ -1042,6 +1096,14 @@ function renderSettingsForm(data, area) {
   const agents = data.agents || [];
   const sharedDir = data.shared_dir || '—';
   const agentId = data.agent_id || '';
+  const issues = getConfigIssues(data);
+  const checklistHtml = issues.length ? `<div class="config-checklist">
+    <div class="config-checklist-title">启动前需要完成</div>
+    ${issues.map(i => `<div>• ${esc(i)}</div>`).join('')}
+  </div>` : `<div class="config-checklist">
+    <div class="config-checklist-title">配置已具备基本条件</div>
+    <div>可以发送消息；轮询会按本机角色和 Webhook 配置工作。</div>
+  </div>`;
 
   let agentHtml = '';
   for (let i = 0; i < agents.length; i++) {
@@ -1088,6 +1150,7 @@ function renderSettingsForm(data, area) {
   }
 
   area.innerHTML = `<div class="settings-panel">
+    ${checklistHtml}
     <div class="settings-section global-section">
       <div class="settings-section-title">全局</div>
       <div class="settings-row">

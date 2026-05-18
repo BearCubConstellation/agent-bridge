@@ -6,8 +6,8 @@ Agent Bridge is a small Python project for file-based asynchronous agent messagi
 
 ## Build, Test, and Development Commands
 
-- `python cli/bridge setup`: run the interactive local configuration flow.
-- `python cli/bridge start --open`: start the UI server and open `http://127.0.0.1:7899`.
+- `python cli/bridge start`: start the UI server and open `http://127.0.0.1:7899`.
+- `python cli/bridge start --no-open`: start the UI server without opening a browser.
 - `python ui/server.py --port 7899 --no-poll`: run only the development UI/API server.
 - `python core/send.py --agent alice "hello"`: append one JSONL message as `alice`.
 - `python -m pip install -r requirements.txt`: install YAML support used by documented configs.

@@ -38,22 +38,22 @@ powershell -c "irm https://raw.githubusercontent.com/SusuAgent/agent-bridge/main
 bridge version
 ```
 
-## 3. 初始化配置
+## 3. 启动 Agent Bridge
 
 运行：
 
 ```bash
-bridge setup
+bridge start
 ```
 
-向导会引导配置：
+首次启动会自动完成能默认的部分：
 
-- 共享目录，例如 `~/.agent-bridge`。
-- 参与对话的 Agent，例如 `hermes` 和 `openclaw`。
-- 本机代表哪个 Agent 运行轮询。
-- 每个 Agent 的 webhook 或 API 唤醒地址。
+- 创建共享目录，例如 `~/.agent-bridge`。
+- 生成 `bridge.yaml`。
+- 创建两个示例 Agent。
+- 打开 WebUI。
 
-初始化完成后会生成：
+启动后会生成：
 
 ```text
 ~/.agent-bridge/bridge.yaml
@@ -61,13 +61,23 @@ bridge setup
 ~/.agent-bridge/history/
 ```
 
-## 4. 配置 bridge.yaml
+用户不需要先运行命令行配置向导。不能默认的部分会在 WebUI 的“设置”页显示，例如本机角色、Agent ID、Webhook URL、认证方式和消息体模板。
 
-配置文件通常位于：
+如果不想自动打开浏览器：
 
 ```bash
-~/.agent-bridge/bridge.yaml
+bridge start --no-open
 ```
+
+## 4. 在 WebUI 中配置
+
+默认地址：
+
+```text
+http://127.0.0.1:7899
+```
+
+进入“设置”页，根据页面顶部的必配置项检查逐项填写。配置文件仍然保存在 `~/.agent-bridge/bridge.yaml`，高级用户也可以手动编辑。
 
 示例：
 
@@ -118,19 +128,7 @@ agents:
 - `wakeup.url`：收到消息后要调用的目标 Agent 接口。
 - `body_template`：发给目标 Agent 的请求体模板。
 
-## 5. 启动控制台
-
-```bash
-bridge start --open
-```
-
-默认地址：
-
-```text
-http://127.0.0.1:7899
-```
-
-控制台可以用于查看对话、发送消息、编辑 Agent、查看轮询状态、暂停或恢复轮询，以及归档当前场景。
+控制台还可以用于查看对话、发送消息、编辑 Agent、查看轮询状态、暂停或恢复轮询，以及归档当前场景。
 
 ## 6. 发送第一条消息
 
@@ -187,7 +185,7 @@ agent_id: openclaw
 ## 9. 日常使用命令
 
 ```bash
-bridge start --open       # 启动控制台
+bridge start              # 启动控制台并打开浏览器
 bridge send --agent hermes "轮到你了。"
 bridge status             # 查看状态
 bridge config             # 查看配置

@@ -46,18 +46,18 @@ powershell -c "irm https://raw.githubusercontent.com/SusuAgent/agent-bridge/main
 
 安装前需要 Python 3.8+。Windows 用户建议从 python.org 安装，并勾选 **Add Python to PATH**。
 
-### 初始化剧场
+### 启动剧场
 
 ```bash
-bridge setup
+bridge start
 ```
 
-向导会配置共享目录、Agent 身份、Webhook 和可选自启动。完成后会生成 `bridge.yaml`。
+首次启动会自动创建默认共享目录和 `bridge.yaml`，并打开 WebUI。能默认的配置会自动填写，必须由用户决定的 Agent ID、Webhook URL、消息体模板等，会在 WebUI 的“设置”页集中展示。
 
-### 启动控制台
+如果你只想启动服务而不打开浏览器：
 
 ```bash
-bridge start --open
+bridge start --no-open
 ```
 
 默认地址是 `http://127.0.0.1:7899`。控制台可以查看对话、编辑 Agent、发送消息、归档当前场景、暂停或恢复轮询。
@@ -87,8 +87,8 @@ bridge version        # 查看版本
 
 ```bash
 python -m pip install -r requirements.txt
-python cli/bridge setup
-python ui/server.py --open
+python cli/bridge start
+python ui/server.py --open   # 仅直接运行 server.py 时需要 --open
 ```
 
 ## 它如何工作

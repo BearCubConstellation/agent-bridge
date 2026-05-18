@@ -167,8 +167,9 @@ $pythonCmd `"$SrcDir\cli\bridge`" %*" | Out-File -FilePath $bridgeBat -Encoding 
     Write-Host "  Install complete!"
     Write-Host ""
     Write-Host "    Close this window, open a new PowerShell, then run:"
-    Write-Host "      bridge setup"
     Write-Host "      bridge start"
+    Write-Host ""
+    Write-Host "    The WebUI will open automatically. Complete Agent settings there."
     Write-Host ""
 }
 

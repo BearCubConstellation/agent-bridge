@@ -74,6 +74,36 @@ def default_agents(shared_dir):
             "filter_from": "",
             "wakeup": {"url": "", "method": "POST", "body_template": {"message": "{{message}}"}},
         }
+    if agents:
+        return agents
+    agents = {
+        "alice": {
+            "id": "alice",
+            "display_name": "Alice",
+            "color": "#ff6b6b",
+            "cursor": "line",
+            "filter_from": "bob",
+            "wakeup": {
+                "url": "",
+                "method": "POST",
+                "headers": {"Content-Type": "application/json"},
+                "body_template": {"message": "{{message}}"},
+            },
+        },
+        "bob": {
+            "id": "bob",
+            "display_name": "Bob",
+            "color": "#4ecdc4",
+            "cursor": "line",
+            "filter_from": "alice",
+            "wakeup": {
+                "url": "",
+                "method": "POST",
+                "headers": {"Content-Type": "application/json"},
+                "body_template": {"message": "{{message}}"},
+            },
+        },
+    }
     return agents
 
 
@@ -101,9 +131,11 @@ def read_bridge(shared_dir):
         cfg = {}
 
     cfg.setdefault("shared_dir", str(shared_dir))
-    cfg.setdefault("agent_id", "")
     if "agents" not in cfg or not cfg["agents"]:
         cfg["agents"] = default_agents(shared_dir)
+    cfg.setdefault("agent_id", "")
+    if not cfg["agent_id"] and cfg["agents"]:
+        cfg["agent_id"] = next(iter(cfg["agents"].keys()))
     for key, a in cfg["agents"].items():
         a.setdefault("display_name", a.get("id", key).capitalize())
         a.setdefault("color", "#ff6b6b" if list(cfg["agents"].keys())[0] == key else "#4ecdc4")

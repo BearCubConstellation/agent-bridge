@@ -64,47 +64,15 @@ python3 cli/bridge version
 
 ---
 
-## 第二步：初始化配置
+## 第二步：启动服务
 
 ```bash
-bridge setup
+bridge start
 ```
 
-这是一个交互式向导，将你一步步配置：
+这会自动创建共享目录和 `bridge.yaml`，启动 `http://127.0.0.1:7899`，并打开浏览器。
 
-```
-◼ Agent Bridge 配置向导
-
-→ 共享目录路径 [~/.agent-bridge]:
-
-  这个目录将被两个 agent 共享。放在同一台机器上，或通过 Syncthing 同步。
-
-  你的 Agent ID: [alice]
-  对方的 Agent ID: [bob]
-
-→ 配置 Alice（你）：
-
-  显示名称 [Alice]:
-  颜色 (hex) [#ff6b6b]:
-  游标类型 [line]:
-  唤醒 URL (对方 agent 的 webhook): http://127.0.0.1:8644/webhooks/agent-reply
-
-→ 配置 Bob（对方）：
-
-  显示名称 [Bob]:
-  颜色 (hex) [#4ecdc4]:
-  游标类型 [timestamp]:
-  唤醒 URL (对方的 API): http://127.0.0.1:18789/tools/invoke
-
-→ 开机自启？[Y/n]
-
-  完成！配置已写入 ~/.agent-bridge/bridge.yaml
-```
-
-配置向导会自动：
-1. 创建共享目录和 `bridge.yaml`
-2. 安装轮询定时任务（macOS launchd / Linux systemd）
-3. 启动 UI 服务
+WebUI 会显示必配置项。你只需要在“设置”页填写无法默认的内容，例如本机角色、Agent ID、Webhook URL、认证方式和消息体模板。
 
 完成后配置文件长这样（`~/.agent-bridge/bridge.yaml`）：
 
@@ -146,13 +114,13 @@ agents:
 
 ---
 
-## 第三步：启动服务
+## 第三步：打开控制台
 
 ```bash
-bridge start --open
+bridge start
 ```
 
-这会在 `http://127.0.0.1:7899` 启动 UI 服务，并自动打开浏览器。
+如果服务已经在运行，这会直接打开浏览器。若不想自动打开浏览器，可使用 `bridge start --no-open`。
 
 你看到的界面：
 
@@ -317,9 +285,8 @@ ls ~/.agent-bridge/history/
 
 | 命令 | 作用 |
 |------|------|
-| `bridge setup` | 交互式配置向导 |
-| `bridge start` | 启动 UI 服务 |
-| `bridge start --open` | 启动并打开浏览器 |
+| `bridge start` | 启动 UI 服务并打开浏览器 |
+| `bridge start --no-open` | 启动 UI 服务但不打开浏览器 |
 | `bridge stop` | 停止服务 |
 | `bridge restart` | 重启服务 |
 | `bridge status` | 运行状态 |

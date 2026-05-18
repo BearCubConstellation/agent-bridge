@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ui"))
 
-from server import BridgeHandler, PollManager, find_shared_dir
+from server import BridgeHandler, PollManager, find_shared_dir, read_bridge
 
 
 def get_free_port():
@@ -124,6 +124,23 @@ class TestServerBase(unittest.TestCase):
                 return e.code, json.loads(e.read())
             finally:
                 e.close()
+
+
+class TestDefaultConfig(unittest.TestCase):
+    def test_read_bridge_creates_webui_editable_defaults(self):
+        tmpdir = Path(tempfile.mkdtemp(prefix="agent-bridge-default-"))
+        try:
+            cfg, config_path = read_bridge(tmpdir)
+            self.assertEqual(cfg["shared_dir"], str(tmpdir))
+            self.assertEqual(cfg["agent_id"], "alice")
+            self.assertIn("alice", cfg["agents"])
+            self.assertIn("bob", cfg["agents"])
+            self.assertEqual(cfg["agents"]["alice"]["filter_from"], "bob")
+            self.assertEqual(cfg["agents"]["bob"]["filter_from"], "alice")
+            self.assertEqual(cfg["agents"]["alice"]["wakeup"]["url"], "")
+            self.assertEqual(config_path, tmpdir / "bridge.yaml")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 class TestServeStatic(TestServerBase):
