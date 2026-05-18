@@ -16,26 +16,76 @@ function Write-Ok($msg)   { Write-Host "  " -NoNewline; Write-Host "OK" -Foregro
 function Write-Err($msg)  { Write-Host "  " -NoNewline; Write-Host "ERR" -ForegroundColor Red -NoNewline; Write-Host " $msg" }
 function Write-Info($msg) { Write-Host "  " -NoNewline; Write-Host "..." -ForegroundColor Cyan -NoNewline; Write-Host " $msg" }
 
+function Find-Python {
+    $candidates = @(
+        @{ Command = "python3"; Args = @() },
+        @{ Command = "python"; Args = @() },
+        @{ Command = "py"; Args = @("-3") }
+    )
+
+    foreach ($candidate in $candidates) {
+        $cmd = Get-Command $candidate.Command -ErrorAction SilentlyContinue
+        if (-not $cmd) {
+            continue
+        }
+
+        $args = @($candidate.Args)
+        $version = $null
+        try {
+            $version = & $cmd.Source @args -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+        } catch {
+            continue
+        }
+
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($version)) {
+            continue
+        }
+
+        $version = $version.Trim()
+        if ($version -notmatch '^\d+\.\d+$') {
+            continue
+        }
+
+        return [PSCustomObject]@{
+            Source = $cmd.Source
+            Args = $args
+            Version = $version
+        }
+    }
+
+    return $null
+}
+
+function Format-PythonCommand($pythonInfo) {
+    $parts = @($pythonInfo.Source) + @($pythonInfo.Args)
+    return ($parts | ForEach-Object {
+        if ($_ -match '\s') { "`"$_`"" } else { $_ }
+    }) -join " "
+}
+
 function Main {
     Write-Host ""
     Write-Host "  Agent Bridge Installer"
     Write-Host "  ---"
 
     # --- Check Python ---
-    $pyPath = $null
-    try { $pyPath = Get-Command python3 -ErrorAction Stop } catch {}
-    if (-not $pyPath) {
-        try { $pyPath = Get-Command python -ErrorAction Stop } catch {}
-    }
-    if (-not $pyPath) {
+    $pythonInfo = Find-Python
+    if (-not $pythonInfo) {
         Write-Err "Python 3 not found"
         Write-Host ""
         Write-Host "    Install Python 3.8+: https://www.python.org/downloads/"
         Write-Host "    (check 'Add Python to PATH' during installation)"
+        Write-Host ""
+        Write-Host "    If Python is installed from python.org, restart PowerShell and try:"
+        Write-Host "      python --version"
+        Write-Host "      py -3 --version"
+        Write-Host ""
+        Write-Host "    If Windows opens Microsoft Store instead, disable App Execution Aliases:"
+        Write-Host "      Settings > Apps > Advanced app settings > App execution aliases"
         return
     }
 
-    $ver = & $pyPath.Source -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+    $ver = $pythonInfo.Version
     $parts = $ver.Split(".")
     $maj = [int]$parts[0]
     $min = [int]$parts[1]
@@ -43,7 +93,8 @@ function Main {
         Write-Err "Python version too old: $ver (need >= 3.8)"
         return
     }
-    Write-Ok "Python $ver"
+    $pythonCmd = Format-PythonCommand $pythonInfo
+    Write-Ok "Python $ver ($pythonCmd)"
 
     # --- Download source ---
     Write-Info "Downloading source..."
@@ -77,19 +128,19 @@ function Main {
     # --- Install Python dependencies ---
     Write-Info "Installing Python dependencies..."
     try {
-        & $pyPath.Source -m pip install --user -r "$SrcDir\requirements.txt"
+        & $pythonInfo.Source @($pythonInfo.Args) -m pip install --user -r "$SrcDir\requirements.txt"
     } catch {
         Write-Err "Python dependency installation failed"
         Write-Host ""
         Write-Host "    Try manually:"
-        Write-Host "      python -m pip install --user -r `"$SrcDir\requirements.txt`""
+        Write-Host "      $pythonCmd -m pip install --user -r `"$SrcDir\requirements.txt`""
         return
     }
     if ($LASTEXITCODE -ne 0) {
         Write-Err "Python dependency installation failed"
         Write-Host ""
         Write-Host "    Try manually:"
-        Write-Host "      python -m pip install --user -r `"$SrcDir\requirements.txt`""
+        Write-Host "      $pythonCmd -m pip install --user -r `"$SrcDir\requirements.txt`""
         return
     }
     Write-Ok "Dependencies installed"
@@ -100,7 +151,7 @@ function Main {
     New-Item -ItemType Directory -Path $binDir -Force | Out-Null
     $bridgeBat = "$binDir\bridge.bat"
     "@echo off
-python `"$SrcDir\cli\bridge`" %*" | Out-File -FilePath $bridgeBat -Encoding ASCII -Force
+$pythonCmd `"$SrcDir\cli\bridge`" %*" | Out-File -FilePath $bridgeBat -Encoding ASCII -Force
     Write-Ok "Command installed: $bridgeBat"
 
     # --- Update PATH ---
