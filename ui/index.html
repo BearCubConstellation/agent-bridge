@@ -4,8 +4,23 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Agent Bridge · 控制中心</title>
+<script>
+(function() {
+  try {
+    const saved = localStorage.getItem('agentBridgeTheme');
+    if (saved === 'light' || saved === 'dark') {
+      document.documentElement.dataset.theme = saved;
+      return;
+    }
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+      document.documentElement.dataset.theme = 'light';
+    }
+  } catch (e) {}
+})();
+</script>
 <style>
 :root {
+  color-scheme: dark;
   --bg: #0a0a0f;
   --surface: #12121e;
   --surface2: #1a1a2e;
@@ -22,6 +37,21 @@
   --font-ui: -apple-system, 'SF Pro Text', 'Helvetica Neue', sans-serif;
   --radius: 8px;
   --radius-sm: 5px;
+}
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --surface2: #eef1f7;
+  --surface3: #e2e7f0;
+  --text: #182033;
+  --text2: #526078;
+  --text3: #7a8496;
+  --border: #d9dfeb;
+  --accent: #d9365a;
+  --green: #168f86;
+  --red: #d64545;
+  --amber: #9a6a00;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -45,7 +75,17 @@ body {
   background-clip: text;
 }
 .header-sub { color: var(--text3); font-size: 0.78em; font-family: var(--font); }
-.header-right { display: flex; gap: 6px; }
+.header-right { display: flex; align-items: center; gap: 8px; }
+.badge-list { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.theme-toggle {
+  width: 30px; height: 30px; flex: 0 0 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text2);
+  cursor: pointer; font-size: 0.9em; font-family: var(--font-ui);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.theme-toggle:hover { background: var(--surface3); color: var(--text); border-color: var(--text3); }
 
 .agent-badge {
   display: inline-flex; align-items: center; gap: 5px;
@@ -495,7 +535,10 @@ body {
     <span class="logo">agent-bridge</span>
     <span class="header-sub">控制中心</span>
   </div>
-  <div class="header-right" id="agentBadgeContainer"></div>
+  <div class="header-right">
+    <button class="theme-toggle" id="themeToggle" type="button" title="切换明暗色模式" aria-label="切换明暗色模式">☀</button>
+    <div class="badge-list" id="agentBadgeContainer"></div>
+  </div>
 </header>
 
 <div class="cards-bar" id="cardsBar"></div>
@@ -605,6 +648,37 @@ const pollLabel = $('#pollLabel');
 const pollBtn = $('#pollBtn');
 const activityArea = $('#activityArea');
 const configBanner = $('#configBanner');
+const themeToggle = $('#themeToggle');
+
+// ═══ Theme ═══
+const THEME_KEY = 'agentBridgeTheme';
+
+function currentTheme() {
+  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+}
+
+function applyTheme(theme) {
+  const next = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  if (themeToggle) {
+    themeToggle.textContent = next === 'light' ? '☾' : '☀';
+    themeToggle.title = next === 'light' ? '切换到暗色模式' : '切换到亮色模式';
+    themeToggle.setAttribute('aria-label', themeToggle.title);
+  }
+}
+
+function saveTheme(theme) {
+  try { localStorage.setItem(THEME_KEY, theme); } catch (e) {}
+}
+
+applyTheme(currentTheme());
+if (themeToggle) {
+  themeToggle.addEventListener('click', () => {
+    const next = currentTheme() === 'light' ? 'dark' : 'light';
+    applyTheme(next);
+    saveTheme(next);
+  });
+}
 
 // ═══ API ═══
 async function apiGet(p) { try { const r = await fetch(p); return await r.json(); } catch(e) { return null; } }
