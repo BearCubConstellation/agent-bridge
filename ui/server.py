@@ -15,7 +15,6 @@ import http.server
 import json
 import os
 import re
-import shutil
 import sys
 import threading
 import time
@@ -26,7 +25,7 @@ from pathlib import Path
 # 从 core/ 导入
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
 from lock import file_lock
-from poll import run_poll, load_config as load_poll_config
+from poll import do_archive, run_poll, load_config as load_poll_config
 
 
 BRIDGE_FILENAME = "bridge.yaml"
@@ -34,6 +33,14 @@ VALID_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
 # validate_agent_id 复用 core/send.py 的实现
 from send import validate_agent_id  # noqa: E402
 DEFAULT_POLL_INTERVAL = 180  # 秒
+
+
+def is_relative_to(path, parent):
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
 
 
 # ─── 配置 ─────────────────────────────────────────────
@@ -77,7 +84,7 @@ def read_bridge(shared_dir):
         # 先尝试 yaml，失败再尝试 json
         try:
             import yaml
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
         except ImportError:
             pass
@@ -86,7 +93,7 @@ def read_bridge(shared_dir):
         # json fallback (仅在 yaml 不可用或失败时)
         if cfg is None:
             try:
-                with open(config_path) as f:
+                with open(config_path, encoding="utf-8") as f:
                     cfg = json.load(f)
             except Exception:
                 cfg = {}
@@ -109,10 +116,10 @@ def read_bridge(shared_dir):
 def write_bridge(config_path, config):
     try:
         import yaml
-        with open(config_path, "w") as f:
+        with open(config_path, "w", encoding="utf-8") as f:
             yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
     except ImportError:
-        with open(config_path, "w") as f:
+        with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
 
 
@@ -140,7 +147,7 @@ class PollManager:
         self._lock = threading.Lock()
 
         self.last_result = {"ok": True, "new_msgs": 0, "delivered": False,
-                            "archived": None, "error": "", "to_agent": ""}
+                            "archived": None, "error": "", "to_agent": "", "from_agent": ""}
         self.last_run = None
         self.running = False
         self.history = []  # [(timestamp, result_dict), ...]
@@ -184,7 +191,7 @@ class PollManager:
             result = run_poll(config)
         except Exception as e:
             result = {"ok": False, "new_msgs": 0, "delivered": False,
-                      "archived": None, "error": str(e), "to_agent": ""}
+                      "archived": None, "error": str(e), "to_agent": "", "from_agent": ""}
 
         with self._lock:
             self.last_result = result
@@ -260,7 +267,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         script_dir = Path(__file__).resolve().parent
         filepath = (script_dir / filename).resolve()
         # 防止路径遍历：确保解析后的路径仍在 script_dir 下
-        if not filepath.is_relative_to(script_dir):
+        if not is_relative_to(filepath, script_dir):
             self.send_error(403)
             return
         if not filepath.exists():
@@ -449,24 +456,11 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         if not msgs:
             self.send_json({"ok": False, "error": "active file is empty"})
             return
-        history = shared / "history"
-        history.mkdir(parents=True, exist_ok=True)
-        now = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        name = f"{now}.jsonl"
-        try:
-            # Acquire both locks: .active.lock prevents concurrent writes,
-            # .archive.lock prevents concurrent archive operations
-            with file_lock(shared / ".archive.lock"):
-                with file_lock(shared / ".active.lock"):
-                    if not active.exists():
-                        self.send_json({"ok": False, "error": "active file disappeared"})
-                        return
-                    shutil.move(str(active), str(history / name))
-                    # 创建新的空 active.jsonl，避免存在性检查空窗
-                    active.touch()
+        name = do_archive(shared)
+        if name:
             self.send_json({"ok": True, "archived_to": name, "message_count": len(msgs)})
-        except OSError as e:
-            self.send_json({"ok": False, "error": str(e)})
+        else:
+            self.send_json({"ok": False, "error": "archive failed"})
 
     # ─── Poll API ───────────────────────────────────
 
@@ -540,7 +534,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "msg": text,
         }
         with file_lock(shared / ".active.lock"):
-            with open(active, "a") as f:
+            with open(active, "a", encoding="utf-8") as f:
                 f.write(json.dumps(msg, ensure_ascii=False) + "\n")
 
         self.send_json({"ok": True, "agent_id": agent_id, "chars": len(text)})
@@ -570,7 +564,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
 
         if archive:
             archive_path = (shared / "history" / archive).resolve()
-            if not archive_path.is_relative_to((shared / "history").resolve()):
+            if not is_relative_to(archive_path, (shared / "history").resolve()):
                 self.send_json({"ok": False, "error": "invalid archive name"})
                 return
             for m in parse_jsonl(archive_path):
@@ -634,7 +628,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         # 防止路径遍历：使用 is_relative_to 替代字符串前缀匹配
         shared = Path(self.shared_dir)
         filepath = (shared / "history" / filename).resolve()
-        if not filepath.is_relative_to((shared / "history").resolve()):
+        if not is_relative_to(filepath, (shared / "history").resolve()):
             self.send_error(403)
             return
         if not filepath.exists():
@@ -712,16 +706,14 @@ def main():
     server = http.server.HTTPServer((args.host, args.port), BridgeHandler)
     url = f"http://{args.host}:{args.port}"
 
-    print(f"╔══════════════════════════════════════════╗")
-    print(f"║   Agent Bridge · UI + Poll              ║")
-    print(f"║                                        ║")
-    print(f"║   📁  {shared_dir:<33}║")
-    print(f"║   🌐  {url:<33}║")
-    print(f"║   🔄  轮询: {'每 '+str(args.poll_interval)+'s' if not args.no_poll else '已关闭':<31}║")
-    print(f"║                                        ║")
-    print(f"║   点击 Agent Badge 编辑 ID/名称/颜色    ║")
-    print(f"║   Ctrl+C 停止                          ║")
-    print(f"╚══════════════════════════════════════════╝")
+    poll_text = f"every {args.poll_interval}s" if not args.no_poll else "disabled"
+    print("=" * 44)
+    print("Agent Bridge - UI + Poll")
+    print(f"Shared dir: {shared_dir}")
+    print(f"URL:        {url}")
+    print(f"Polling:    {poll_text}")
+    print("Ctrl+C to stop")
+    print("=" * 44)
 
     if args.open:
         import webbrowser

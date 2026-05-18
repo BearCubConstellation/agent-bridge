@@ -163,7 +163,7 @@ agent-bridge/
 │   ├── ARCHITECTURE.md
 │   ├── SETUP.md
 │   └── CUSTOMIZE.md
-├── tests/                    # 单元测试 (92 tests)
+├── tests/                    # 单元测试 (96 tests)
 ├── README.md
 └── LICENSE
 ```
@@ -241,8 +241,8 @@ UI 也能修改 ID、名称和颜色，并自动写回 `bridge.yaml`。
 
 ## 依赖
 
-- **运行时**：Python 3.8+（仅标准库）
-- **可选**：`pyyaml`（未安装时自动用 JSON）
+- **运行时**：Python 3.8+
+- **依赖**：`PyYAML`（用于读取/写入文档中的 YAML 配置）
 - **UI**：无外部框架（Python 内置 http.server）
 
 ## 许可证

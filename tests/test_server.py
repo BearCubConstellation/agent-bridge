@@ -62,7 +62,7 @@ class TestServerBase(unittest.TestCase):
         }
         import yaml
         cfg_path = cls.tmpdir / "bridge.yaml"
-        with open(cfg_path, "w") as f:
+        with open(cfg_path, "w", encoding="utf-8") as f:
             yaml.dump(cfg, f, allow_unicode=True)
 
         cls.port = get_free_port()
@@ -78,6 +78,8 @@ class TestServerBase(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
+        cls.server.server_close()
+        cls.server_thread.join(timeout=5)
         shutil.rmtree(cls.tmpdir, ignore_errors=True)
 
     def _get(self, path):
@@ -86,7 +88,10 @@ class TestServerBase(unittest.TestCase):
             with urllib.request.urlopen(req, timeout=5) as resp:
                 return resp.status, json.loads(resp.read())
         except urllib.error.HTTPError as e:
-            return e.code, e.read().decode()
+            try:
+                return e.code, e.read().decode()
+            finally:
+                e.close()
 
     def _post(self, path, data):
         body = json.dumps(data).encode()
@@ -99,7 +104,10 @@ class TestServerBase(unittest.TestCase):
             with urllib.request.urlopen(req, timeout=5) as resp:
                 return resp.status, json.loads(resp.read())
         except urllib.error.HTTPError as e:
-            return e.code, json.loads(e.read())
+            try:
+                return e.code, json.loads(e.read())
+            finally:
+                e.close()
 
     def _put(self, path, data):
         body = json.dumps(data).encode()
@@ -112,7 +120,10 @@ class TestServerBase(unittest.TestCase):
             with urllib.request.urlopen(req, timeout=5) as resp:
                 return resp.status, json.loads(resp.read())
         except urllib.error.HTTPError as e:
-            return e.code, json.loads(e.read())
+            try:
+                return e.code, json.loads(e.read())
+            finally:
+                e.close()
 
 
 class TestServeStatic(TestServerBase):
@@ -134,7 +145,10 @@ class TestServeStatic(TestServerBase):
                 # 如果返回 200 说明漏洞存在
                 self.fail(f"Path traversal not blocked! Status={resp.status}")
         except urllib.error.HTTPError as e:
-            self.assertIn(e.code, (403, 404))
+            try:
+                self.assertIn(e.code, (403, 404))
+            finally:
+                e.close()
 
     def test_nonexistent_static(self):
         """GET /nonexistent.css 应返回 404。"""
@@ -143,7 +157,10 @@ class TestServeStatic(TestServerBase):
             urllib.request.urlopen(req, timeout=5)
             self.fail("Expected 404")
         except urllib.error.HTTPError as e:
-            self.assertEqual(e.code, 404)
+            try:
+                self.assertEqual(e.code, 404)
+            finally:
+                e.close()
 
 
 class TestConfigAPI(TestServerBase):
@@ -214,8 +231,11 @@ class TestConfigAPI(TestServerBase):
         try:
             urllib.request.urlopen(req, timeout=5)
         except urllib.error.HTTPError as e:
-            data = json.loads(e.read())
-            self.assertFalse(data["ok"])
+            try:
+                data = json.loads(e.read())
+                self.assertFalse(data["ok"])
+            finally:
+                e.close()
 
 
 class TestMessageAPI(TestServerBase):
@@ -328,7 +348,10 @@ class TestHistoryAPI(TestServerBase):
             urllib.request.urlopen(req, timeout=5)
             self.fail("Expected 404")
         except urllib.error.HTTPError as e:
-            self.assertEqual(e.code, 404)
+            try:
+                self.assertEqual(e.code, 404)
+            finally:
+                e.close()
 
     def test_history_rejects_non_jsonl(self):
         """GET /api/history/../../etc/passwd 应被拒绝。"""
@@ -339,7 +362,10 @@ class TestHistoryAPI(TestServerBase):
             urllib.request.urlopen(req, timeout=5)
             self.fail("Expected error")
         except urllib.error.HTTPError as e:
-            self.assertIn(e.code, (400, 403, 404))
+            try:
+                self.assertIn(e.code, (400, 403, 404))
+            finally:
+                e.close()
 
     def test_history_valid_archive(self):
         """GET /api/history/<file>.jsonl 返回消息。"""
@@ -351,7 +377,7 @@ class TestHistoryAPI(TestServerBase):
             {"ts": "2026-01-01 12:00:00", "from": "alice", "msg": "test"},
             {"ts": "2026-01-01 12:00:01", "from": "bob", "msg": "reply"},
         ]
-        with open(archive, "w") as f:
+        with open(archive, "w", encoding="utf-8") as f:
             for m in msgs:
                 f.write(json.dumps(m, ensure_ascii=False) + "\n")
 

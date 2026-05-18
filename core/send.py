@@ -39,7 +39,7 @@ def load_bridge_config(config_path=None):
             # 先尝试 yaml，失败再尝试 json
             try:
                 import yaml
-                with open(p) as f:
+                with open(p, encoding="utf-8") as f:
                     return yaml.safe_load(f) or {}
             except ImportError:
                 pass
@@ -47,7 +47,7 @@ def load_bridge_config(config_path=None):
                 pass
             # yaml 不可用或解析失败，尝试 json fallback
             try:
-                with open(p) as f:
+                with open(p, encoding="utf-8") as f:
                     return json.load(f)
             except Exception:
                 continue
@@ -92,10 +92,10 @@ def send(agent_id, active_file, text, quiet=False):
     }
     lock_path = active_file.parent / ".active.lock"
     with file_lock(lock_path):
-        with open(active_file, "a") as f:
+        with open(active_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(msg, ensure_ascii=False) + "\n")
     if not quiet:
-        print(f"[{agent_id}] ✓ Message sent ({len(text)} chars)")
+        print(f"[{agent_id}] Message sent ({len(text)} chars)")
 
 
 def main():

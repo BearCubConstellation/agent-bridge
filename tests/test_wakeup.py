@@ -5,12 +5,13 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
 
-from poll import build_body, resolve_token
+from poll import build_body, resolve_token, wakeup_agent
 
 
 class TestBuildBody(unittest.TestCase):
@@ -103,19 +104,19 @@ class TestResolveToken(unittest.TestCase):
 
     def test_plain_text_token(self):
         token_file = Path(self.tmpdir) / "token.txt"
-        token_file.write_text("my-secret-token\n")
+        token_file.write_text("my-secret-token\n", encoding="utf-8")
         result = resolve_token({"token_path": str(token_file)})
         self.assertEqual(result, "my-secret-token")
 
     def test_json_string_token(self):
         token_file = Path(self.tmpdir) / "token.json"
-        token_file.write_text(json.dumps("json-token"))
+        token_file.write_text(json.dumps("json-token"), encoding="utf-8")
         result = resolve_token({"token_path": str(token_file)})
         self.assertEqual(result, "json-token")
 
     def test_json_object_with_jsonpath(self):
         token_file = Path(self.tmpdir) / "config.json"
-        token_file.write_text(json.dumps({"api": {"key": "nested-token"}}))
+        token_file.write_text(json.dumps({"api": {"key": "nested-token"}}), encoding="utf-8")
         result = resolve_token({
             "token_path": str(token_file),
             "token_jsonpath": "api.key"
@@ -124,7 +125,7 @@ class TestResolveToken(unittest.TestCase):
 
     def test_jsonpath_deep_nesting(self):
         token_file = Path(self.tmpdir) / "deep.json"
-        token_file.write_text(json.dumps({"a": {"b": {"c": "deep-val"}}}))
+        token_file.write_text(json.dumps({"a": {"b": {"c": "deep-val"}}}), encoding="utf-8")
         result = resolve_token({
             "token_path": str(token_file),
             "token_jsonpath": "a.b.c"
@@ -133,7 +134,7 @@ class TestResolveToken(unittest.TestCase):
 
     def test_jsonpath_missing_key_returns_none(self):
         token_file = Path(self.tmpdir) / "partial.json"
-        token_file.write_text(json.dumps({"a": "val"}))
+        token_file.write_text(json.dumps({"a": "val"}), encoding="utf-8")
         result = resolve_token({
             "token_path": str(token_file),
             "token_jsonpath": "b.c"
@@ -141,13 +142,66 @@ class TestResolveToken(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_tilde_expansion(self):
-        token_file = Path.home() / ".test_agent_bridge_token"
+        old_userprofile = os.environ.get("USERPROFILE")
+        old_home = os.environ.get("HOME")
+        home = Path(self.tmpdir) / "home"
+        home.mkdir()
+        os.environ["USERPROFILE"] = str(home)
+        os.environ["HOME"] = str(home)
+        token_file = home / ".test_agent_bridge_token"
         try:
-            token_file.write_text("home-token")
+            token_file.write_text("home-token", encoding="utf-8")
             result = resolve_token({"token_path": "~/.test_agent_bridge_token"})
             self.assertEqual(result, "home-token")
         finally:
             token_file.unlink(missing_ok=True)
+            if old_userprofile is None:
+                os.environ.pop("USERPROFILE", None)
+            else:
+                os.environ["USERPROFILE"] = old_userprofile
+            if old_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old_home
+
+
+class TestWakeupAgent(unittest.TestCase):
+    def test_uses_configured_http_method(self):
+        import http.server
+        import socket
+
+        seen = {}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_PUT(self):
+                seen["method"] = self.command
+                seen["body"] = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                self.send_response(204)
+                self.end_headers()
+
+            def log_message(self, fmt, *args):
+                pass
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+
+        server = http.server.HTTPServer(("127.0.0.1", port), Handler)
+        thread = threading.Thread(target=server.handle_request)
+        thread.start()
+        try:
+            ok, msg = wakeup_agent({
+                "url": f"http://127.0.0.1:{port}/hook",
+                "method": "PUT",
+                "body_template": {"message": "{{message}}"},
+            }, "hello", "alice")
+        finally:
+            thread.join(timeout=5)
+            server.server_close()
+
+        self.assertTrue(ok, msg)
+        self.assertEqual(seen["method"], "PUT")
+        self.assertIn(b"hello", seen["body"])
 
 
 if __name__ == "__main__":

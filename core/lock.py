@@ -26,7 +26,7 @@ if _IS_WINDOWS:
 
     def lock_file(f):
         """Acquire an exclusive lock on *f* (Windows)."""
-        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
         f.seek(0, 2)  # seek to end so append position is correct after lock
 
     def unlock_file(f):
@@ -39,8 +39,8 @@ if _IS_WINDOWS:
 
     def _flock_ex(fd):
         """Exclusive lock by path (Windows)."""
-        # Use msvcrt locking on the file descriptor
-        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        # Use a blocking lock so concurrent writers wait instead of failing.
+        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
 
     def _flock_un(fd):
         """Unlock by path (Windows)."""

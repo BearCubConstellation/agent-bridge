@@ -74,7 +74,7 @@ class TestSend(unittest.TestCase):
 
     def test_send_writes_json_line(self):
         send("alice", self.active_file, "hello world")
-        lines = self.active_file.read_text().strip().split("\n")
+        lines = self.active_file.read_text(encoding="utf-8").strip().split("\n")
         self.assertEqual(len(lines), 1)
         msg = json.loads(lines[0])
         self.assertEqual(msg["from"], "alice")
@@ -84,7 +84,7 @@ class TestSend(unittest.TestCase):
     def test_send_appends_multiple(self):
         send("alice", self.active_file, "msg1")
         send("bob", self.active_file, "msg2")
-        lines = self.active_file.read_text().strip().split("\n")
+        lines = self.active_file.read_text(encoding="utf-8").strip().split("\n")
         self.assertEqual(len(lines), 2)
         self.assertEqual(json.loads(lines[0])["from"], "alice")
         self.assertEqual(json.loads(lines[1])["from"], "bob")
@@ -93,19 +93,19 @@ class TestSend(unittest.TestCase):
         nested = Path(self.tmpdir) / "deep" / "nested" / "active.jsonl"
         send("alice", nested, "test")
         self.assertTrue(nested.exists())
-        msg = json.loads(nested.read_text().strip())
+        msg = json.loads(nested.read_text(encoding="utf-8").strip())
         self.assertEqual(msg["msg"], "test")
 
     def test_send_timestamp_format(self):
         send("alice", self.active_file, "ts test")
-        msg = json.loads(self.active_file.read_text().strip())
+        msg = json.loads(self.active_file.read_text(encoding="utf-8").strip())
         # 格式应为 YYYY-MM-DD HH:MM:SS
         ts = msg["ts"]
         self.assertRegex(ts, r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 
     def test_send_unicode(self):
         send("alice", self.active_file, "你好世界 🌍")
-        msg = json.loads(self.active_file.read_text().strip())
+        msg = json.loads(self.active_file.read_text(encoding="utf-8").strip())
         self.assertEqual(msg["msg"], "你好世界 🌍")
 
     def test_send_invalid_agent_id_exits(self):

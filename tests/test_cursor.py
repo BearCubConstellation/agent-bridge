@@ -40,19 +40,19 @@ class TestReadCursorLine(unittest.TestCase):
 
     def test_read_valid_line_number(self):
         cursor_file = Path(self.tmpdir) / ".alice_cursor"
-        cursor_file.write_text("42")
+        cursor_file.write_text("42", encoding="utf-8")
         result = read_cursor(cursor_file, "line")
         self.assertEqual(result, 42)
 
     def test_read_invalid_content_returns_zero(self):
         cursor_file = Path(self.tmpdir) / ".alice_cursor"
-        cursor_file.write_text("not_a_number")
+        cursor_file.write_text("not_a_number", encoding="utf-8")
         result = read_cursor(cursor_file, "line")
         self.assertEqual(result, 0)
 
     def test_read_empty_file_returns_zero(self):
         cursor_file = Path(self.tmpdir) / ".alice_cursor"
-        cursor_file.write_text("")
+        cursor_file.write_text("", encoding="utf-8")
         result = read_cursor(cursor_file, "line")
         self.assertEqual(result, 0)
 
@@ -72,7 +72,7 @@ class TestReadCursorTimestamp(unittest.TestCase):
 
     def test_read_valid_timestamp(self):
         cursor_file = Path(self.tmpdir) / ".bob_ts_cursor"
-        cursor_file.write_text("2025-05-15 13:30:00")
+        cursor_file.write_text("2025-05-15 13:30:00", encoding="utf-8")
         result = read_cursor(cursor_file, "timestamp")
         self.assertIsNotNone(result)
         self.assertEqual(result.year, 2025)
@@ -81,13 +81,13 @@ class TestReadCursorTimestamp(unittest.TestCase):
 
     def test_read_invalid_timestamp_returns_none(self):
         cursor_file = Path(self.tmpdir) / ".bob_ts_cursor"
-        cursor_file.write_text("not-a-timestamp")
+        cursor_file.write_text("not-a-timestamp", encoding="utf-8")
         result = read_cursor(cursor_file, "timestamp")
         self.assertIsNone(result)
 
     def test_read_empty_file_returns_none(self):
         cursor_file = Path(self.tmpdir) / ".bob_ts_cursor"
-        cursor_file.write_text("")
+        cursor_file.write_text("", encoding="utf-8")
         result = read_cursor(cursor_file, "timestamp")
         self.assertIsNone(result)
 
@@ -103,18 +103,18 @@ class TestWriteCursor(unittest.TestCase):
     def test_write_line_cursor(self):
         cursor_file = Path(self.tmpdir) / ".alice_cursor"
         write_cursor(cursor_file, "line", 42)
-        self.assertEqual(cursor_file.read_text().strip(), "42")
+        self.assertEqual(cursor_file.read_text(encoding="utf-8").strip(), "42")
 
     def test_write_timestamp_cursor(self):
         cursor_file = Path(self.tmpdir) / ".bob_ts_cursor"
         ts = datetime(2025, 5, 15, 13, 30, 0)
         write_cursor(cursor_file, "timestamp", ts)
-        self.assertEqual(cursor_file.read_text().strip(), "2025-05-15 13:30:00")
+        self.assertEqual(cursor_file.read_text(encoding="utf-8").strip(), "2025-05-15 13:30:00")
 
     def test_write_none_timestamp(self):
         cursor_file = Path(self.tmpdir) / ".bob_ts_cursor"
         write_cursor(cursor_file, "timestamp", None)
-        self.assertEqual(cursor_file.read_text().strip(), "")
+        self.assertEqual(cursor_file.read_text(encoding="utf-8").strip(), "")
 
     def test_roundtrip_line(self):
         cursor_file = Path(self.tmpdir) / ".alice_cursor"

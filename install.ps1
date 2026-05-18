@@ -74,6 +74,26 @@ function Main {
     Rename-Item -Path $extracted -NewName "src" -Force
     Write-Ok "Source ready: $SrcDir"
 
+    # --- Install Python dependencies ---
+    Write-Info "Installing Python dependencies..."
+    try {
+        & $pyPath.Source -m pip install --user -r "$SrcDir\requirements.txt"
+    } catch {
+        Write-Err "Python dependency installation failed"
+        Write-Host ""
+        Write-Host "    Try manually:"
+        Write-Host "      python -m pip install --user -r `"$SrcDir\requirements.txt`""
+        return
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Python dependency installation failed"
+        Write-Host ""
+        Write-Host "    Try manually:"
+        Write-Host "      python -m pip install --user -r `"$SrcDir\requirements.txt`""
+        return
+    }
+    Write-Ok "Dependencies installed"
+
     # --- Install bridge command ---
     Write-Info "Installing bridge command..."
     $binDir = "$env:USERPROFILE\.local\bin"

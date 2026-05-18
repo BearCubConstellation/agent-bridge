@@ -29,10 +29,10 @@ class TestShouldArchive(unittest.TestCase):
         lines = []
         for i in range(count):
             lines.append(json.dumps({"ts": ts, "from": "alice", "msg": f"msg {i}"}))
-        self.active.write_text("\n".join(lines) + "\n")
+        self.active.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def test_empty_file_returns_false(self):
-        self.active.write_text("")
+        self.active.write_text("", encoding="utf-8")
         self.assertFalse(should_archive(self.active))
 
     def test_missing_file_returns_false(self):
@@ -61,7 +61,7 @@ class TestShouldArchive(unittest.TestCase):
 
     def test_no_ts_field_returns_false(self):
         lines = [json.dumps({"from": "alice", "msg": f"msg {i}"}) for i in range(5)]
-        self.active.write_text("\n".join(lines) + "\n")
+        self.active.write_text("\n".join(lines) + "\n", encoding="utf-8")
         self.assertFalse(should_archive(self.active))
 
 
@@ -72,7 +72,7 @@ class TestDoArchive(unittest.TestCase):
         # 写 60 条消息
         lines = [json.dumps({"ts": "2025-05-15 12:00:00", "from": "a", "msg": f"m{i}"})
                  for i in range(60)]
-        self.active.write_text("\n".join(lines) + "\n")
+        self.active.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -86,15 +86,15 @@ class TestDoArchive(unittest.TestCase):
         archived_files = list(history_dir.glob("*.jsonl"))
         self.assertEqual(len(archived_files), 1)
 
-    def test_archive_removes_active(self):
+    def test_archive_recreates_empty_active(self):
         do_archive(Path(self.tmpdir))
-        self.assertFalse(self.active.exists())
+        self.assertTrue(self.active.exists())
+        self.assertEqual(self.active.read_text(encoding="utf-8"), "")
 
     def test_archive_returns_name(self):
         result = do_archive(Path(self.tmpdir))
         self.assertIsNotNone(result)
-        # 格式: 2025-05-15_1200.jsonl
-        self.assertRegex(result, r"\d{4}-\d{2}-\d{2}_\d{4}\.jsonl")
+        self.assertRegex(result, r"\d{4}-\d{2}-\d{2}_\d{6}_\d{6}\.jsonl")
 
     def test_archive_no_active_file(self):
         os.remove(self.active)
@@ -122,7 +122,7 @@ class TestParseJsonl(unittest.TestCase):
             json.dumps({"ts": "2025-01-01 00:00:00", "from": "a", "msg": "hello"}),
             json.dumps({"ts": "2025-01-01 00:00:01", "from": "b", "msg": "world"}),
         ]
-        f.write_text("\n".join(lines) + "\n")
+        f.write_text("\n".join(lines) + "\n", encoding="utf-8")
         result = parse_jsonl(f)
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0]["msg"], "hello")
@@ -130,7 +130,7 @@ class TestParseJsonl(unittest.TestCase):
 
     def test_parse_empty_file(self):
         f = Path(self.tmpdir) / "test.jsonl"
-        f.write_text("")
+        f.write_text("", encoding="utf-8")
         result = parse_jsonl(f)
         self.assertEqual(result, [])
 
@@ -140,7 +140,7 @@ class TestParseJsonl(unittest.TestCase):
 
     def test_parse_skips_blank_lines(self):
         f = Path(self.tmpdir) / "test.jsonl"
-        f.write_text('\n{"a":1}\n\n{"b":2}\n')
+        f.write_text('\n{"a":1}\n\n{"b":2}\n', encoding="utf-8")
         result = parse_jsonl(f)
         self.assertEqual(len(result), 2)
 
