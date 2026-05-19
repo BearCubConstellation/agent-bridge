@@ -664,21 +664,8 @@ body {
 
   <!-- ═══ Agent pane ═══ -->
   <div class="tab-pane" id="pane-agent">
-    <div class="agent-area">
-      <div class="agent-section">
-        <div class="agent-section-header">
-          <div class="agent-section-title">已配置</div>
-        </div>
-        <div class="badge-list agent-page-badges" id="agentBadgeContainer"></div>
-        <div class="cards-bar" id="cardsBar"></div>
-      </div>
-      <div class="agent-section">
-        <div class="agent-section-header">
-          <div class="agent-section-title">本机发现</div>
-          <button class="scan-btn" id="scanAgentsBtn" type="button">重新扫描</button>
-        </div>
-        <div class="discover-grid" id="discoveredAgents"></div>
-      </div>
+    <div class="agent-area" id="agentArea">
+      <div class="empty-state">加载中…</div>
     </div>
   </div>
 
@@ -747,10 +734,8 @@ openFolderBtn.type = 'button';
 openFolderBtn.title = '打开当前对话目录';
 openFolderBtn.textContent = '📂 目录';
 if (chatControls && refreshBtn) chatControls.insertBefore(openFolderBtn, refreshBtn);
-const cardsBar = $('#cardsBar');
-const badgeContainer = $('#agentBadgeContainer');
-const discoveredAgents = $('#discoveredAgents');
-const scanAgentsBtn = $('#scanAgentsBtn');
+const discoverEl = () => $('#discoveredAgents');
+const scanAgentsBtn = null;
 const composeAgent = $('#composeAgent');
 const composeInput = $('#composeInput');
 const composeBtn = $('#composeBtn');
@@ -818,7 +803,6 @@ async function loadConfig() {
   }
   state.agentMap = newMap;
   renderBadges();
-  renderCards();
   renderComposeSelect();
   renderConfigBanner(data);
 }
@@ -852,55 +836,35 @@ function renderConfigBanner(data) {
     return;
   }
   configBanner.className = 'config-banner show';
-  configBanner.innerHTML = `<span>还需要完成 ${issues.length} 个配置项：${esc(issues.slice(0, 2).join('；'))}${issues.length > 2 ? '…' : ''}</span><button onclick="switchToSettings()">去配置</button>`;
+  configBanner.innerHTML = `<span>还需要完成 ${issues.length} 个配置项：${esc(issues.slice(0, 2).join('；'))}${issues.length > 2 ? '…' : ''}</span><button onclick="switchToAgent()">去配置</button>`;
 }
 
-function switchToSettings() {
-  const btn = document.querySelector('.tab-btn[data-tab="settings"]');
+function switchToAgent() {
+  const btn = document.querySelector('.tab-btn[data-tab="agent"]');
   if (btn) btn.click();
 }
 
-// ═══ Badges (header) ═══
+// ═══ Badges (agent tab) ═══
 function renderBadges() {
-  badgeContainer.innerHTML = '';
+  const container = $('#agentBadgeContainer');
+  if (!container) return;
+  container.innerHTML = '';
   for (const a of state.agents) {
     const el = document.createElement('div');
     el.className = 'agent-badge'; el.dataset.agentId = a.id;
     el.innerHTML = `<span class="agent-dot" style="background:${a.color}"></span><span>${esc(a.display_name||a.id)}</span>${a.sample ? '<span class="discover-pill sample">示例</span>' : ''}`;
     el.addEventListener('click', e => { e.stopPropagation(); openEditPopup(el, a); });
-    badgeContainer.appendChild(el);
-  }
-}
-
-// ═══ Agent cards (dashboard) ═══
-async function renderCards() {
-  cardsBar.innerHTML = '';
-  for (const a of (state.fullAgents || state.agents)) {
-    const card = document.createElement('div');
-    card.className = 'agent-card';
-    card.innerHTML = `
-      <div class="agent-card-header">
-        <span class="agent-card-dot" style="background:${a.color}"></span>
-        <span class="agent-card-name" style="color:${a.color}">${esc(a.display_name || a.id)}</span>
-      </div>
-      <div class="agent-card-row"><span class="label">ID</span><span class="val">${esc(a.id)}</span></div>
-      ${a.sample ? '<div class="agent-card-row"><span class="label">状态</span><span class="val warn">示例 Agent</span></div>' : ''}
-      <div class="agent-card-row"><span class="label">来自</span><span class="val">${esc(a.filter_from || '—')}</span></div>
-      <div class="agent-card-row"><span class="label">游标</span><span class="val">${esc(a.cursor || 'line')}</span></div>
-      <div class="agent-card-row">
-        <span class="label">唤醒</span>
-        <span class="val ${a.wakeup?.url ? 'ok' : 'warn'}">${a.wakeup?.url ? '✓ 已配置' : '✗ 未配置'}</span>
-      </div>`;
-    cardsBar.appendChild(card);
+    container.appendChild(el);
   }
 }
 
 async function loadDiscoveredAgents() {
-  if (!discoveredAgents) return;
-  discoveredAgents.innerHTML = '<div class="discover-empty">扫描中…</div>';
+  const el = discoverEl();
+  if (!el) return;
+  el.innerHTML = '<div class="discover-empty">扫描中…</div>';
   const data = await apiGet('/api/agents/discover');
   if (!data || !data.ok) {
-    discoveredAgents.innerHTML = '<div class="discover-empty">扫描失败</div>';
+    el.innerHTML = '<div class="discover-empty">扫描失败</div>';
     return;
   }
   state.discoveredAgents = data.agents || [];
@@ -908,13 +872,14 @@ async function loadDiscoveredAgents() {
 }
 
 function renderDiscoveredAgents() {
-  if (!discoveredAgents) return;
+  const el = discoverEl();
+  if (!el) return;
   const agents = state.discoveredAgents || [];
   if (!agents.length) {
-    discoveredAgents.innerHTML = '<div class="discover-empty">未发现本机 Agent</div>';
+    el.innerHTML = '<div class="discover-empty">未发现本机 Agent</div>';
     return;
   }
-  discoveredAgents.innerHTML = '';
+  el.innerHTML = '';
   for (const a of agents) {
     const card = document.createElement('div');
     card.className = 'discover-card';
@@ -928,7 +893,7 @@ function renderDiscoveredAgents() {
       <div class="discover-meta">${esc(a.kind || 'Agent')} · ${esc(a.id)}</div>
       <div class="discover-meta">${esc(a.details || '')}</div>
       <div class="discover-meta">${esc(a.source || '')}</div>`;
-    discoveredAgents.appendChild(card);
+    el.appendChild(card);
   }
 }
 
@@ -1040,7 +1005,7 @@ async function saveAgent(agent, popup) {
   const r = await apiPost('/api/config', {agents: payload});
   if (r && r.ok) {
     st.textContent = '✓ 已保存'; st.className = 'edit-status ok';
-    await loadConfig(); await loadMessages(); await renderCards();
+    await loadConfig(); await loadMessages();
     setTimeout(closeEditPopup, 700);
   } else { st.textContent = '失败: '+(r?.error||'unknown'); st.className='edit-status error'; }
 }
@@ -1332,13 +1297,47 @@ async function loadSettings() {
     area.innerHTML = '<div class="empty-state"><div style="font-size:2.5em;opacity:0.4">⚠</div><h3 style="color:var(--text2);font-weight:500;margin-top:8px;font-size:1em">无法加载配置</h3></div>';
     return;
   }
-  renderSettingsForm(data, area);
+  renderGlobalSettings(data, area);
 }
 
-function renderSettingsForm(data, area) {
+function renderGlobalSettings(data, area) {
   const agents = data.agents || [];
   const sharedDir = data.shared_dir || '—';
   const agentId = data.agent_id || '';
+
+  area.innerHTML = `<div class="settings-panel">
+    <div class="settings-section global-section">
+      <div class="settings-section-title">全局</div>
+      <div class="settings-row">
+        <label>共享目录</label>
+        <input type="text" value="${escAttr(sharedDir)}" readonly style="color:var(--text3);font-family:var(--font);font-size:0.8em" />
+      </div>
+      <div class="settings-row">
+        <label>本机角色</label>
+        <select id="settingsAgentId" style="max-width:200px">
+          <option value="">— 未设置 —</option>
+          ${agents.map(a => `<option value="${escAttr(a.id)}" ${agentId===a.id?'selected':''}>${esc(a.display_name || a.id)}</option>`).join('')}
+        </select>
+        <span style="font-size:0.72em;color:var(--text3);margin-left:4px">运行 poll 时使用哪个 Agent 的身份</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function loadAgentConfig() {
+  const area = $('#agentArea');
+  const data = await apiGet('/api/config');
+  if (!data || !data.ok) {
+    area.innerHTML = '<div class="empty-state"><div style="font-size:2.5em;opacity:0.4">⚠</div><h3 style="color:var(--text2);font-weight:500;margin-top:8px;font-size:1em">无法加载配置</h3></div>';
+    return;
+  }
+  renderAgentConfig(data, area);
+  renderBadges();
+  loadDiscoveredAgents();
+}
+
+function renderAgentConfig(data, area) {
+  const agents = data.agents || [];
   const issues = getConfigIssues(data);
   const checklistHtml = issues.length ? `<div class="config-checklist">
     <div class="config-checklist-title">启动前需要完成</div>
@@ -1394,32 +1393,25 @@ function renderSettingsForm(data, area) {
 
   area.innerHTML = `<div class="settings-panel">
     ${checklistHtml}
-    <div class="settings-section global-section">
-      <div class="settings-section-title">全局</div>
-      <div class="settings-row">
-        <label>共享目录</label>
-        <input type="text" value="${escAttr(sharedDir)}" readonly style="color:var(--text3);font-family:var(--font);font-size:0.8em" />
-      </div>
-      <div class="settings-row">
-        <label>本机角色</label>
-        <select id="settingsAgentId" style="max-width:200px">
-          <option value="">— 未设置 —</option>
-          ${agents.map(a => `<option value="${escAttr(a.id)}" ${agentId===a.id?'selected':''}>${esc(a.display_name || a.id)}</option>`).join('')}
-        </select>
-        <span style="font-size:0.72em;color:var(--text3);margin-left:4px">运行 poll 时使用哪个 Agent 的身份</span>
-      </div>
-    </div>
+    <div class="badge-list agent-page-badges" id="agentBadgeContainer"></div>
     ${agentHtml}
     <div class="settings-actions">
       <button class="add-agent-btn" onclick="addAgent()">＋ 添加 Agent</button>
       <button class="save-btn" onclick="saveFullConfig()">💾 保存配置</button>
       <span class="save-status" id="saveStatus"></span>
     </div>
+    <div class="agent-section" style="margin-top:24px">
+      <div class="agent-section-header">
+        <div class="agent-section-title">本机发现</div>
+        <button class="scan-btn" id="scanAgentsBtn" type="button" onclick="loadDiscoveredAgents()">重新扫描</button>
+      </div>
+      <div class="discover-grid" id="discoveredAgents"></div>
+    </div>
   </div>`;
 }
 
 function addAgent() {
-  const area = $('#settingsArea');
+  const area = $('#agentArea');
   const container = area.querySelector('.settings-panel');
   if (!container) return;
   
@@ -1480,10 +1472,10 @@ async function saveFullConfig() {
   status.textContent = '保存中…';
   status.className = 'save-status';
   
-  const area = $('#settingsArea');
+  const area = $('#agentArea');
   const container = area.querySelector('.settings-panel');
   if (!container) { status.textContent = '表单未加载'; status.className = 'save-status error'; return; }
-  
+
   const agentCards = container.querySelectorAll('.agent-config');
   const agents = [];
   const errors = [];
@@ -1508,7 +1500,7 @@ async function saveFullConfig() {
     return;
   }
   
-  const agentId = $('#settingsAgentId').value;
+  const agentId = ( $('#settingsAgentId') || {} ).value;
   
   const r = await apiPost('/api/config/full', {
     agents: agents,
@@ -1541,7 +1533,6 @@ pollBtn.addEventListener('click', async () => {
   if (d && d.running) await apiPost('/api/poll/stop', {});
   else await apiPost('/api/poll/start', {});
   await loadPollStatus();
-  await renderCards();
 });
 pollBtn.addEventListener('dblclick', async () => {
   const r = await apiPost('/api/poll/now', {});
@@ -1559,7 +1550,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     state.activeTab = btn.dataset.tab;
     // Lazy load
     if (btn.dataset.tab === 'activity') loadActivity();
-    if (btn.dataset.tab === 'agent' && state.discoveredAgents === null) loadDiscoveredAgents();
+    if (btn.dataset.tab === 'agent') loadAgentConfig();
     if (btn.dataset.tab === 'settings') loadSettings();
   });
 });
