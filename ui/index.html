@@ -1622,6 +1622,7 @@ function renderGlobalSettings(data, area) {
       <div class="settings-row">
         <label>共享目录</label>
         <input type="text" value="${escAttr(sharedDir)}" readonly style="color:var(--text3);font-family:var(--font);font-size:0.8em" />
+        <button id="openSharedDirBtn" style="margin-left:4px;white-space:nowrap">打开目录</button>
       </div>
       <div class="settings-row">
         <label>本机角色</label>
@@ -1633,6 +1634,15 @@ function renderGlobalSettings(data, area) {
       </div>
     </div>
   </div>`;
+  const openBtn = $('#openSharedDirBtn');
+  if (openBtn) {
+    openBtn.onclick = async () => {
+      const dir = data.shared_dir;
+      if (!dir) return;
+      const res = await apiPost('/api/open-dir', {path: dir});
+      if (!res || !res.ok) toast(res?.error || '无法打开目录', 'error');
+    };
+  }
 }
 
 async function loadAgentConfig() {

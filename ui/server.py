@@ -495,6 +495,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "/api/config/full": self.handle_update_config_full,
             "/api/archive": self.handle_archive,
             "/api/open-current-folder": self.handle_open_current_folder,
+            "/api/open-dir": self.handle_open_dir,
             "/api/poll/now": self.handle_poll_now,
             "/api/poll/start": self.handle_poll_start,
             "/api/poll/stop": self.handle_poll_stop,
@@ -853,6 +854,21 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         self.send_json({"ok": True, "path": str(chat_file)})
+
+    def handle_open_dir(self):
+        body, err = self._read_json_body()
+        if err:
+            self.send_json(err)
+            return
+        dir_path = body.get("path", "")
+        if not dir_path:
+            self.send_json({"ok": False, "error": "path is required"})
+            return
+        ok, error = open_in_file_manager(dir_path)
+        if not ok:
+            self.send_json({"ok": False, "error": error or "failed to open directory"})
+            return
+        self.send_json({"ok": True, "path": str(dir_path)})
 
     # ─── Poll API ───────────────────────────────────
 
