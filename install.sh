@@ -134,11 +134,11 @@ check_python
 download
 
 info "Installing Python dependencies..."
-if ! "$PY" -m pip install --user -r "$SRC_DIR/requirements.txt"; then
+if ! "$PY" -m pip --disable-pip-version-check install --user -r "$SRC_DIR/requirements.txt"; then
     err "Python dependency installation failed"
     echo ""
     echo "    Try manually:"
-    echo "      $PY -m pip install --user -r $SRC_DIR/requirements.txt"
+    echo "      $PY -m pip --disable-pip-version-check install --user -r $SRC_DIR/requirements.txt"
     exit 1
 fi
 ok "Dependencies installed"

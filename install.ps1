@@ -128,19 +128,19 @@ function Main {
     # --- Install Python dependencies ---
     Write-Info "Installing Python dependencies..."
     try {
-        & $pythonInfo.Source @($pythonInfo.Args) -m pip install --user -r "$SrcDir\requirements.txt"
+        & $pythonInfo.Source @($pythonInfo.Args) -m pip --disable-pip-version-check install --user -r "$SrcDir\requirements.txt"
     } catch {
         Write-Err "Python dependency installation failed"
         Write-Host ""
         Write-Host "    Try manually:"
-        Write-Host "      $pythonCmd -m pip install --user -r `"$SrcDir\requirements.txt`""
+        Write-Host "      $pythonCmd -m pip --disable-pip-version-check install --user -r `"$SrcDir\requirements.txt`""
         return
     }
     if ($LASTEXITCODE -ne 0) {
         Write-Err "Python dependency installation failed"
         Write-Host ""
         Write-Host "    Try manually:"
-        Write-Host "      $pythonCmd -m pip install --user -r `"$SrcDir\requirements.txt`""
+        Write-Host "      $pythonCmd -m pip --disable-pip-version-check install --user -r `"$SrcDir\requirements.txt`""
         return
     }
     Write-Ok "Dependencies installed"
