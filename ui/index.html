@@ -389,6 +389,123 @@ body {
 }
 .tool-btn:hover { background: var(--surface3); color: var(--text); }
 
+/* ═══ Chat Room Grid ═══ */
+.room-grid-view { max-width: 960px; margin: 0 auto; }
+.room-grid-header { display: flex; align-items: center; margin-bottom: 16px; }
+.room-grid-title { font-size: 0.95em; color: var(--text2); font-weight: 600; }
+.room-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+}
+.room-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+.room-card:hover { border-color: var(--text3); }
+.room-card.active { border-color: var(--green); }
+.room-card-name { font-weight: 600; font-size: 0.88em; margin-bottom: 10px; }
+.room-card-agents { display: flex; gap: 8px; margin-bottom: 8px; }
+.room-agent-slot {
+  flex: 1; background: var(--surface2);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 8px; text-align: center;
+  font-size: 0.78em; color: var(--text3);
+  min-height: 56px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  transition: all 0.2s;
+}
+.room-agent-slot.drag-over {
+  border-color: var(--accent);
+  background: rgba(233,69,96,0.06);
+}
+.room-agent-slot.occupied {
+  border-style: solid; border-color: var(--border);
+}
+.room-agent-slot .agent-chip {
+  display: flex; align-items: center; gap: 5px; font-weight: 600;
+}
+.room-agent-slot .agent-chip .dot { width: 8px; height: 8px; border-radius: 50%; }
+.room-agent-slot .slot-hint { font-size: 0.72em; color: var(--text3); }
+.room-card-add {
+  background: var(--surface);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  aspect-ratio: 1 / 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.2s;
+  color: var(--text3);
+}
+.room-card-add:hover { border-color: var(--accent); color: var(--accent); }
+.room-card-add .add-icon { font-size: 2em; margin-bottom: 8px; }
+.room-card-add .add-label { font-size: 0.85em; }
+.room-del-btn {
+  position: absolute; top: 8px; right: 8px;
+  background: none; border: 1px solid transparent;
+  color: var(--text3); cursor: pointer; font-size: 0.75em;
+  padding: 2px 6px; border-radius: 3px; transition: all 0.15s;
+}
+.room-del-btn:hover { color: var(--red); border-color: var(--border); }
+.room-status {
+  font-size: 0.7em; padding: 2px 8px;
+  border-radius: 10px; display: inline-block;
+}
+.room-status.waiting { color: var(--amber); background: rgba(255,217,61,0.1); }
+.room-status.active { color: var(--green); background: rgba(78,205,196,0.1); }
+
+/* Agent drag source panel */
+.agent-source-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px; margin-bottom: 16px;
+}
+.agent-source-panel-title {
+  font-size: 0.72em; color: var(--text3);
+  text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
+}
+.agent-source-list { display: flex; gap: 8px; flex-wrap: wrap; }
+.agent-drag-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 5px 12px; font-size: 0.8em;
+  cursor: grab; transition: all 0.15s; user-select: none;
+}
+.agent-drag-chip:hover { border-color: var(--text3); }
+.agent-drag-chip.dragging { opacity: 0.4; }
+.agent-drag-chip .dot { width: 7px; height: 7px; border-radius: 50%; }
+
+/* Room conversation view */
+.room-conv-view { max-width: 860px; margin: 0 auto; }
+.conv-header {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+}
+.back-btn {
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text2); padding: 5px 12px;
+  border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 0.8em; font-family: var(--font-ui);
+}
+.back-btn:hover { background: var(--surface3); color: var(--text); }
+.conv-room-name { font-weight: 600; font-size: 0.9em; }
+.conv-agent-badges { display: flex; gap: 6px; margin-left: auto; }
+.conv-agent-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 0.75em; padding: 3px 8px;
+  border-radius: 12px; background: var(--surface2);
+}
+.conv-agent-badge .dot { width: 6px; height: 6px; border-radius: 50%; }
+
 /* ═══ Activity pane ═══ */
 .activity-timeline { max-width: 700px; margin: 0 auto; }
 .activity-item {
@@ -648,28 +765,39 @@ body {
 
   <!-- ═══ Chat pane ═══ -->
   <div class="tab-pane active" id="pane-chat">
-    <div class="chat-area">
-      <div class="compose-bar">
-        <select id="composeAgent"></select>
-        <input type="text" id="composeInput" placeholder="输入消息，按 Enter 发送…" />
-        <button class="compose-btn" id="composeBtn">发送→</button>
+
+    <!-- Room grid view (default) -->
+    <div id="roomGridView" class="room-grid-view">
+      <div class="room-grid-header">
+        <h2 class="room-grid-title">聊天室</h2>
       </div>
-      <div class="chat-controls">
-        <input class="chat-search" id="searchInput" type="text" placeholder="搜索消息…" />
-        <select class="chat-archive" id="archiveSelect">
-          <option value="__active__">📄 当前对话</option>
-        </select>
-        <button class="tool-btn" id="archiveBtn" title="归档">📦</button>
-        <button class="tool-btn" id="refreshBtn" title="刷新">⟳</button>
-      </div>
-      <div id="chatArea">
-        <div class="empty-state">
-          <div class="icon">💬</div>
-          <h3>暂无消息</h3>
-          <p>等 agent 双方开始通信后，消息将在这里显示。</p>
-        </div>
+      <div id="roomGrid" class="room-grid">
+        <div class="empty-state"><div class="icon">💬</div><h3>加载中…</h3></div>
       </div>
     </div>
+
+    <!-- Room conversation view (hidden by default) -->
+    <div id="roomConvView" class="room-conv-view" style="display:none">
+      <div class="conv-header">
+        <button class="back-btn" id="backToRooms">← 聊天室</button>
+        <span id="convRoomName" class="conv-room-name"></span>
+        <div id="convAgentBadges" class="conv-agent-badges"></div>
+      </div>
+      <div class="chat-area">
+        <div class="compose-bar">
+          <select id="composeAgent"></select>
+          <input type="text" id="composeInput" placeholder="输入消息，按 Enter 发送…" />
+          <button class="compose-btn" id="composeBtn">发送→</button>
+        </div>
+        <div class="chat-controls">
+          <input class="chat-search" id="searchInput" type="text" placeholder="搜索消息…" />
+          <button class="tool-btn" id="refreshBtn" title="刷新">⟳</button>
+        </div>
+        <div id="chatArea"></div>
+      </div>
+    </div>
+
+  </div>
   </div>
 
   <!-- ═══ Agent pane ═══ -->
@@ -728,22 +856,14 @@ let state = {
   autoRefresh: true, pollInterval: null, pollStatusTimer: null,
   editingBadge: null, popupCloseHandler: null,
   activeTab: 'chat',
+  rooms: [], currentRoomId: null, chatView: 'grid',
 };
 
 const $ = s => document.querySelector(s);
 const chatArea = $('#chatArea');
 const searchInput = $('#searchInput');
-const archiveSelect = $('#archiveSelect');
 const refreshBtn = $('#refreshBtn');
-const archiveBtn = $('#archiveBtn');
-const chatControls = document.querySelector('.chat-controls');
-const openFolderBtn = document.createElement('button');
-openFolderBtn.className = 'tool-btn';
-openFolderBtn.id = 'openFolderBtn';
-openFolderBtn.type = 'button';
-openFolderBtn.title = '打开当前对话目录';
-openFolderBtn.textContent = '📂 目录';
-if (chatControls && refreshBtn) chatControls.insertBefore(openFolderBtn, refreshBtn);
+const backToRoomsBtn = $('#backToRooms');
 const discoverEl = () => $('#discoveredAgents');
 const scanAgentsBtn = null;
 const composeAgent = $('#composeAgent');
@@ -909,13 +1029,7 @@ function renderDiscoveredAgents() {
 
 // ═══ Compose select ═══
 function renderComposeSelect() {
-  composeAgent.innerHTML = '';
-  for (const a of state.agents) {
-    const opt = document.createElement('option');
-    opt.value = a.id;
-    opt.textContent = a.display_name || a.id;
-    composeAgent.appendChild(opt);
-  }
+  // Compose select is now populated per-room in openRoomConversation()
 }
 
 composeInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
@@ -1024,6 +1138,10 @@ async function saveAgent(agent, popup) {
 function resolveAgent(sender) { return state.agentMap[sender] || state.agentAlias[sender] || {display_name:sender,color:'#8888a0'}; }
 
 async function loadMessages() {
+  if (state.chatView === 'conversation' && state.currentRoomId) {
+    await loadRoomMessages();
+    return;
+  }
   const p = new URLSearchParams();
   if (state.archive !== '__active__') p.set('archive', state.archive);
   if (state.searchQuery) p.set('q', state.searchQuery);
@@ -1077,45 +1195,229 @@ function updateStats() {
   statLast.textContent = ms.length ? '· 最后 ' + (ms[ms.length-1].ts||'').slice(11,19) : '';
 }
 
-// ═══ Search / Archive / Refresh ═══
+// ═══ Search / Refresh ═══
 let searchTimeout;
 searchInput.addEventListener('input', () => {
   clearTimeout(searchTimeout);
   searchTimeout = setTimeout(() => { state.searchQuery = searchInput.value.trim(); loadMessages(); }, 300);
 });
-archiveSelect.addEventListener('change', () => { state.archive = archiveSelect.value; loadMessages(); });
 refreshBtn.addEventListener('click', refreshAll);
-openFolderBtn.addEventListener('click', openCurrentConversationFolder);
 
-archiveBtn.addEventListener('click', async () => {
-  if (!confirm('归档当前对话？')) return;
-  const r = await apiPost('/api/archive', {});
-  if (r && r.ok) { await loadArchives(); await refreshAll(); }
-});
+// ═══ Room Management ═══
+async function loadRooms() {
+  const data = await apiGet('/api/rooms');
+  if (!data || !data.ok) return;
+  state.rooms = data.rooms || [];
+  renderRoomGrid();
+}
 
-async function openCurrentConversationFolder() {
-  openFolderBtn.disabled = true;
-  try {
-    const r = await apiPost('/api/open-current-folder', {archive: state.archive});
-    if (!r || !r.ok) {
-      alert((r && r.error) || '无法打开当前对话目录');
+function renderRoomGrid() {
+  const grid = $('#roomGrid');
+  if (!grid) return;
+  const agents = state.agents || [];
+
+  let html = '';
+
+  // Agent drag source panel
+  html += `<div class="agent-source-panel" style="grid-column:1/-1">
+    <div class="agent-source-panel-title">拖拽 Agent 到聊天室</div>
+    <div class="agent-source-list">
+      ${agents.map(a => `<div class="agent-drag-chip" draggable="true" data-agent-id="${escAttr(a.id)}">
+        <span class="dot" style="background:${a.color}"></span>
+        ${esc(a.display_name || a.id)}
+      </div>`).join('')}
+    </div>
+  </div>`;
+
+  // Room cards
+  for (const room of state.rooms) {
+    const isReady = room.agents.length === 2;
+    const statusClass = isReady ? 'active' : 'waiting';
+    const statusText = isReady ? '对话中' : '等待 Agent';
+    html += `<div class="room-card ${statusClass}" data-room-id="${escAttr(room.id)}" onclick="openRoomConversation('${escAttr(room.id)}')">
+      <button class="room-del-btn" onclick="event.stopPropagation(); deleteRoom('${escAttr(room.id)}')" title="删除聊天室">✕</button>
+      <div class="room-card-name">${esc(room.name || room.id)}</div>
+      <div class="room-card-agents">${renderAgentSlots(room)}</div>
+      <span class="room-status ${statusClass}">${statusText}</span>
+    </div>`;
+  }
+
+  // Add room card (square)
+  html += `<div class="room-card-add" onclick="addRoom()">
+    <div class="add-icon">+</div>
+    <div class="add-label">新增聊天室</div>
+  </div>`;
+
+  grid.innerHTML = html;
+  setupDragAndDrop();
+}
+
+function renderAgentSlots(room) {
+  const agents = state.agents || [];
+  let html = '';
+  for (let slot = 0; slot < 2; slot++) {
+    const agentId = room.agents[slot];
+    const agent = agentId ? agents.find(a => a.id === agentId) : null;
+    if (agent) {
+      html += `<div class="room-agent-slot occupied" data-room-id="${escAttr(room.id)}" data-slot="${slot}">
+        <div class="agent-chip">
+          <span class="dot" style="background:${agent.color}"></span>
+          ${esc(agent.display_name || agent.id)}
+        </div>
+      </div>`;
+    } else {
+      html += `<div class="room-agent-slot" data-room-id="${escAttr(room.id)}" data-slot="${slot}">
+        <div class="slot-hint">拖入 Agent</div>
+      </div>`;
     }
-  } finally {
-    openFolderBtn.disabled = false;
+  }
+  return html;
+}
+
+function setupDragAndDrop() {
+  document.querySelectorAll('.agent-drag-chip').forEach(chip => {
+    chip.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', chip.dataset.agentId);
+      e.dataTransfer.effectAllowed = 'move';
+      chip.classList.add('dragging');
+    });
+    chip.addEventListener('dragend', () => {
+      chip.classList.remove('dragging');
+      document.querySelectorAll('.room-agent-slot').forEach(s => s.classList.remove('drag-over'));
+    });
+  });
+  document.querySelectorAll('.room-agent-slot').forEach(slot => {
+    slot.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      slot.classList.add('drag-over');
+    });
+    slot.addEventListener('dragleave', () => {
+      slot.classList.remove('drag-over');
+    });
+    slot.addEventListener('drop', e => {
+      e.preventDefault();
+      slot.classList.remove('drag-over');
+      const agentId = e.dataTransfer.getData('text/plain');
+      const roomId = slot.dataset.roomId;
+      const slotIdx = parseInt(slot.dataset.slot);
+      assignAgentToRoom(roomId, slotIdx, agentId);
+    });
+  });
+}
+
+async function assignAgentToRoom(roomId, slotIndex, agentId) {
+  const room = state.rooms.find(r => r.id === roomId);
+  if (!room) return;
+
+  // Check if agent is already in another room
+  for (const r of state.rooms) {
+    if (r.agents.includes(agentId) && r.id !== roomId) {
+      alert(`Agent 已在聊天室「${r.name || r.id}」中，请先移除。`);
+      return;
+    }
+  }
+
+  const agents = [...room.agents];
+  while (agents.length <= slotIndex) agents.push('');
+  agents[slotIndex] = agentId;
+  const cleanAgents = agents.filter(Boolean);
+
+  const result = await apiPost('/api/rooms', {
+    id: roomId,
+    name: room.name,
+    agents: cleanAgents,
+  });
+
+  if (result && result.ok) {
+    await loadRooms();
+    await loadConfig();
+  } else if (result) {
+    alert(result.error || '操作失败');
   }
 }
 
-async function loadArchives() {
-  const data = await apiGet('/api/status');
-  if (!data || !data.ok) return;
-  archiveSelect.innerHTML = '<option value="__active__">📄 当前对话</option>';
-  if (data.history) {
-    for (const h of data.history) {
-      const opt = document.createElement('option');
-      opt.value = h.name; opt.textContent = `📦 ${h.name.replace('.jsonl','')} (${h.count} 条)`;
-      archiveSelect.appendChild(opt);
-    }
+function addRoom() {
+  const name = prompt('聊天室名称：');
+  if (!name || !name.trim()) return;
+  apiPost('/api/rooms', { name: name.trim(), agents: [] }).then(result => {
+    if (result && result.ok) loadRooms();
+    else if (result) alert(result.error || '创建失败');
+  });
+}
+
+async function deleteRoom(roomId) {
+  if (!confirm('确认删除此聊天室？')) return;
+  const result = await apiPost('/api/rooms/delete', { id: roomId });
+  if (result && result.ok) {
+    if (state.currentRoomId === roomId) showRoomGrid();
+    await loadRooms();
+    await loadConfig();
   }
+}
+
+function openRoomConversation(roomId) {
+  const room = state.rooms.find(r => r.id === roomId);
+  if (!room) return;
+
+  state.currentRoomId = roomId;
+  state.chatView = 'conversation';
+
+  const gridView = $('#roomGridView');
+  const convView = $('#roomConvView');
+  if (gridView) gridView.style.display = 'none';
+  if (convView) convView.style.display = 'block';
+
+  const convName = $('#convRoomName');
+  if (convName) convName.textContent = room.name || room.id;
+
+  // Show agent badges
+  const agents = state.agents || [];
+  const badges = $('#convAgentBadges');
+  if (badges) {
+    badges.innerHTML = room.agents.map(aid => {
+      const a = agents.find(x => x.id === aid);
+      if (!a) return '';
+      return `<span class="conv-agent-badge"><span class="dot" style="background:${a.color}"></span>${esc(a.display_name || aid)}</span>`;
+    }).join('');
+  }
+
+  // Populate compose select with room agents only
+  const sel = $('#composeAgent');
+  if (sel) {
+    sel.innerHTML = room.agents.map(aid => {
+      const a = agents.find(x => x.id === aid);
+      return `<option value="${escAttr(aid)}">${esc(a ? a.display_name : aid)}</option>`;
+    }).join('');
+  }
+
+  loadRoomMessages();
+}
+
+function showRoomGrid() {
+  state.currentRoomId = null;
+  state.chatView = 'grid';
+  const gridView = $('#roomGridView');
+  const convView = $('#roomConvView');
+  if (gridView) gridView.style.display = 'block';
+  if (convView) convView.style.display = 'none';
+}
+
+if (backToRoomsBtn) {
+  backToRoomsBtn.addEventListener('click', showRoomGrid);
+}
+
+async function loadRoomMessages() {
+  if (!state.currentRoomId) return;
+  const p = new URLSearchParams();
+  p.set('room', state.currentRoomId);
+  p.set('limit', '500');
+  if (state.searchQuery) p.set('q', state.searchQuery);
+  const data = await apiGet(`/api/messages?${p}`);
+  if (!data || !data.ok) return;
+  state.messages = data.messages || [];
+  renderMessages();
+  updateStats();
 }
 
 // ═══ Activity ═══
@@ -1271,8 +1573,7 @@ function collectAgentData(container) {
   const displayName = container.querySelector('.ag-name').value.trim();
   const color = container.querySelector('.ag-color').value.trim();
   const cursor = container.querySelector('.ag-cursor').value;
-  const filterFrom = container.querySelector('.ag-filter-from').value.trim();
-  
+
   const wuSection = container.querySelector('.wakeup-section');
   const url = wuSection ? wuSection.querySelector('.wu-url').value.trim() : '';
   const method = wuSection ? wuSection.querySelector('.wu-method').value : 'POST';
@@ -1297,7 +1598,7 @@ function collectAgentData(container) {
     wakeup.auth = {type: 'bearer', token_path: tokenPath, token_jsonpath: tokenJsonpath};
   }
   
-  return {id, display_name: displayName || id, color, cursor, filter_from: filterFrom, wakeup};
+  return {id, display_name: displayName || id, color, cursor, filter_from: "", wakeup};
 }
 
 async function loadSettings() {
@@ -1393,10 +1694,6 @@ function renderAgentConfig(data, area) {
             <option value="timestamp" ${a.cursor==='timestamp'?'selected':''}>timestamp（时间戳）</option>
           </select>
         </div>
-        <div class="wakeup-field">
-          <label>只接收来信</label>
-          <input type="text" class="ag-filter-from" value="${escAttr(a.filter_from || '')}" placeholder="对方 Agent ID" />
-        </div>
       </div>
       ${renderWakeupHtml(a.wakeup, i)}
     </div>`;
@@ -1462,10 +1759,6 @@ function addAgent() {
         <option value="line" selected>line（行号）</option>
         <option value="timestamp">timestamp（时间戳）</option>
       </select>
-    </div>
-    <div class="wakeup-field">
-      <label>只接收来信</label>
-      <input type="text" class="ag-filter-from" value="" placeholder="对方 Agent ID" />
     </div>
   </div>
   ${renderWakeupHtml({}, idx)}`;
@@ -1562,6 +1855,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (pane) pane.classList.add('active');
     state.activeTab = btn.dataset.tab;
     // Lazy load
+    if (btn.dataset.tab === 'chat') { loadRooms(); if (state.chatView === 'conversation') loadMessages(); }
     if (btn.dataset.tab === 'activity') loadActivity();
     if (btn.dataset.tab === 'agent') loadAgentConfig();
     if (btn.dataset.tab === 'settings') loadSettings();
@@ -1579,7 +1873,7 @@ function stopAutoRefresh() {
   if (state.pollStatusTimer) { clearInterval(state.pollStatusTimer); state.pollStatusTimer = null; }
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state.autoRefresh) refreshAll(); });
-async function refreshAll() { await Promise.all([loadConfig(), loadMessages(), loadStatus(), loadPollStatus()]); }
+async function refreshAll() { await Promise.all([loadConfig(), loadMessages(), loadRooms(), loadStatus(), loadPollStatus()]); }
 async function loadStatus() {
   const d = await apiGet('/api/status');
   if (!d || !d.ok) return;
@@ -1615,7 +1909,7 @@ if (checkProtocol()) {
   (async function init() {
     await loadConfig();
     await loadDiscoveredAgents();
-    await loadArchives();
+    await loadRooms();
     await refreshAll();
     startAutoRefresh();
     loadPollStatus();

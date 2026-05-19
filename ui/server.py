@@ -11,6 +11,7 @@ Agent Bridge — 本地 UI 服务
     python3 server.py --poll-interval 60       # 每 60 秒轮询一次
 """
 import argparse
+import hashlib
 import http.server
 import json
 import os
@@ -137,6 +138,23 @@ def sample_agents():
             "wakeup": _default_wakeup(),
         },
     }
+
+
+def generate_room_id():
+    return "room_" + hashlib.md5(f"{time.time()}{os.getpid()}".encode()).hexdigest()[:8]
+
+
+def sync_filter_from(cfg):
+    """Auto-derive filter_from for each agent based on room membership."""
+    for a in cfg.get("agents", {}).values():
+        a["filter_from"] = ""
+    for room in cfg.get("rooms", {}).values():
+        agents = room.get("agents", [])
+        if len(agents) == 2:
+            a0, a1 = agents[0], agents[1]
+            if a0 in cfg.get("agents", {}) and a1 in cfg.get("agents", {}):
+                cfg["agents"][a0]["filter_from"] = a1
+                cfg["agents"][a1]["filter_from"] = a0
 
 
 def agent_from_discovery(item, color, peers):
@@ -327,6 +345,7 @@ def read_bridge(shared_dir):
     cfg.setdefault("shared_dir", str(shared_dir))
     if "agents" not in cfg or not cfg["agents"]:
         cfg["agents"] = default_agents(shared_dir)
+    cfg.setdefault("rooms", {})
     cfg.setdefault("agent_id", "")
     if not cfg["agent_id"] and cfg["agents"]:
         cfg["agent_id"] = next(iter(cfg["agents"].keys()))
@@ -460,6 +479,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "/api/status": self.handle_status,
             "/api/poll": self.handle_poll_status,
             "/api/bridge/yaml": self.handle_bridge_yaml,
+            "/api/rooms": self.handle_get_rooms,
         }
         if path in routes:
             routes[path]()
@@ -480,6 +500,8 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "/api/poll/stop": self.handle_poll_stop,
             "/api/poll/history": self.handle_poll_history,
             "/api/send": self.handle_send_message,
+            "/api/rooms": self.handle_save_room,
+            "/api/rooms/delete": self.handle_delete_room,
         }
         handler = routes.get(parsed.path)
         if handler:
@@ -534,11 +556,20 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 "sample": bool(a.get("sample")),
                 "wakeup": a.get("wakeup", {}),
             })
+        rooms_list = []
+        for key, r in cfg.get("rooms", {}).items():
+            rooms_list.append({
+                "id": r.get("id", key),
+                "name": r.get("name", ""),
+                "agents": r.get("agents", []),
+                "created_at": r.get("created_at", ""),
+            })
         self.send_json({
             "ok": True,
             "shared_dir": str(shared),
             "agent_id": cfg.get("agent_id", ""),
             "agents": agents_list,
+            "rooms": rooms_list,
             "active_exists": (shared / "active.jsonl").exists(),
         })
 
@@ -680,11 +711,104 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 cfg["agents"] = {}
                 saved_agents = []
 
+        sync_filter_from(cfg)
         write_bridge(config_path, cfg)
         saved_agents_out = saved_agents if "agents" in body else []
         self.send_json({"ok": True,
                         "saved_agents": saved_agents_out,
                         "message": "配置已保存"})
+
+    # ─── GET /api/rooms ────────────────────────────
+
+    def handle_get_rooms(self):
+        shared = Path(self.shared_dir)
+        cfg, _ = read_bridge(shared)
+        rooms_list = []
+        for key, r in cfg.get("rooms", {}).items():
+            rooms_list.append({
+                "id": r.get("id", key),
+                "name": r.get("name", ""),
+                "agents": r.get("agents", []),
+                "created_at": r.get("created_at", ""),
+            })
+        agents_brief = [
+            {"id": a["id"], "display_name": a.get("display_name", a["id"]),
+             "color": a.get("color", "#8888a0")}
+            for a in cfg.get("agents", {}).values()
+        ]
+        self.send_json({"ok": True, "rooms": rooms_list, "agents": agents_brief})
+
+    # ─── POST /api/rooms ───────────────────────────
+
+    def handle_save_room(self):
+        body, err = self._read_json_body()
+        if err:
+            self.send_json(err)
+            return
+
+        shared = Path(self.shared_dir)
+        cfg, config_path = read_bridge(shared)
+
+        room_id = (body.get("id") or "").strip() or generate_room_id()
+        room_name = (body.get("name") or "").strip()
+        room_agents = body.get("agents") or []
+
+        if len(room_agents) > 2:
+            self.send_json({"ok": False, "error": "room can have at most 2 agents"})
+            return
+
+        for aid in room_agents:
+            if aid not in cfg.get("agents", {}):
+                self.send_json({"ok": False, "error": f"unknown agent: '{aid}'"})
+                return
+
+        # Check no agent is already in another room
+        existing_rooms = cfg.get("rooms", {})
+        for rkey, r in existing_rooms.items():
+            if rkey == room_id:
+                continue
+            for aid in room_agents:
+                if aid in r.get("agents", []):
+                    self.send_json({"ok": False, "error": f"agent '{aid}' is already in room '{r.get('name', rkey)}'"})
+                    return
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        existing = existing_rooms.get(room_id, {})
+        cfg.setdefault("rooms", {})[room_id] = {
+            "id": room_id,
+            "name": room_name or existing.get("name", room_id),
+            "agents": room_agents,
+            "created_at": existing.get("created_at", now),
+        }
+
+        sync_filter_from(cfg)
+        write_bridge(config_path, cfg)
+        self.send_json({"ok": True, "room_id": room_id})
+
+    # ─── POST /api/rooms/delete ────────────────────
+
+    def handle_delete_room(self):
+        body, err = self._read_json_body()
+        if err:
+            self.send_json(err)
+            return
+
+        room_id = (body.get("id") or "").strip()
+        if not room_id:
+            self.send_json({"ok": False, "error": "room id required"})
+            return
+
+        shared = Path(self.shared_dir)
+        cfg, config_path = read_bridge(shared)
+
+        if room_id not in cfg.get("rooms", {}):
+            self.send_json({"ok": False, "error": "room not found"})
+            return
+
+        del cfg["rooms"][room_id]
+        sync_filter_from(cfg)
+        write_bridge(config_path, cfg)
+        self.send_json({"ok": True, "deleted": room_id})
 
     # ─── POST /api/archive ─────────────────────────
 
@@ -822,6 +946,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         params = urllib.parse.parse_qs(query)
         archive = params.get("archive", [None])[0]
         search = params.get("q", [None])[0]
+        room_id = params.get("room", [None])[0]
         limit = int(params.get("limit", [500])[0])
         shared = Path(self.shared_dir)
         all_msgs = []
@@ -845,6 +970,13 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                     for m in parse_jsonl(hf):
                         m["_source"] = hf.name
                         all_msgs.append(m)
+
+        if room_id:
+            cfg, _ = read_bridge(shared)
+            room = cfg.get("rooms", {}).get(room_id)
+            if room:
+                room_agents = set(room.get("agents", []))
+                all_msgs = [m for m in all_msgs if m.get("from") in room_agents]
 
         if search:
             q = search.lower()
