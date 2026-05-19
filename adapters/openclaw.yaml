@@ -31,7 +31,7 @@ agents:
       auth:
         type: bearer
         token_path: ~/.openclaw/openclaw.json
-        token_jsonpath: gateway.auth.password
+        token_jsonpath: gateway.auth.token
       headers:
         Content-Type: application/json
       body_template:
