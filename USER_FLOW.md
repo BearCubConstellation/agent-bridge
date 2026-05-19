@@ -36,6 +36,8 @@ powershell -c "irm https://raw.githubusercontent.com/SusuAgent/agent-bridge/main
 
 ```bash
 bridge version
+# 或者
+bridge --version
 ```
 
 ## 3. 启动 Agent Bridge

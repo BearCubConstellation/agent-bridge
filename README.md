@@ -80,7 +80,7 @@ bridge open           # 打开本地控制台
 bridge stop           # 停止 UI 服务
 bridge restart        # 重启 UI 服务
 bridge uninstall      # 卸载命令和服务，可选择保留数据
-bridge version        # 查看版本
+bridge version        # 查看版本（也支持 bridge --version）
 ```
 
 开发者也可以直接运行：

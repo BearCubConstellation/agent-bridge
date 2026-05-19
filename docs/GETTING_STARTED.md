@@ -49,6 +49,8 @@ source ~/.zshrc
 
 ```bash
 bridge version
+# 或者
+bridge --version
 ```
 
 ### 方式二：手动安装（开发者）
@@ -60,6 +62,8 @@ ln -s ~/.agent-bridge/src/cli/bridge ~/.local/bin/bridge
 # 或者直接运行
 cd ~/.agent-bridge/src
 python3 cli/bridge version
+# 或者
+python3 cli/bridge --version
 ```
 
 ---
@@ -294,7 +298,7 @@ ls ~/.agent-bridge/history/
 | `bridge post "..."` | 同上，别名 |
 | `bridge open` | 打开浏览器 |
 | `bridge config` | 查看配置 |
-| `bridge version` | 版本信息 |
+| `bridge version` / `bridge --version` | 版本信息 |
 
 ---
 
