@@ -303,6 +303,20 @@ def discover_local_agents(shared_dir, include_bridge_config=True):
     # OpenClaw.
     openclaw_config = home / ".openclaw" / "openclaw.json"
     if openclaw_config.exists() or (home / ".openclaw").exists():
+        auth_cfg = {"type": "bearer", "token_path": str(home / ".openclaw" / "openclaw.json")}
+        # 根据实际认证模式推断 JSONPath
+        if openclaw_config.exists():
+            try:
+                oc_data = json.loads(openclaw_config.read_text(encoding="utf-8"))
+                oc_auth = (oc_data.get("gateway") or {}).get("auth") or {}
+                mode = oc_auth.get("mode", "")
+                if mode in ("token", "password"):
+                    auth_cfg["token_jsonpath"] = f"gateway.auth.{mode}"
+            except Exception:
+                pass
+        if "token_jsonpath" not in auth_cfg:
+            auth_cfg["token_jsonpath"] = "gateway.auth.token"
+
         add(_discovered_agent(
             "openclaw",
             "OpenClaw",
@@ -312,11 +326,7 @@ def discover_local_agents(shared_dir, include_bridge_config=True):
             {
                 "url": "http://127.0.0.1:18789/tools/invoke",
                 "method": "POST",
-                "auth": {
-                    "type": "bearer",
-                    "token_path": str(home / ".openclaw" / "openclaw.json"),
-                    "token_jsonpath": "gateway.auth.token",
-                },
+                "auth": auth_cfg,
                 "body_template": {
                     "tool": "sessions_send",
                     "args": {"sessionKey": "agent:main:main", "message": "{{message}}"},
