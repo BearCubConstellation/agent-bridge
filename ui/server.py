@@ -57,38 +57,25 @@ def find_shared_dir():
 from poll import parse_jsonl  # noqa: E402
 
 
-def default_agents(shared_dir):
-    msgs = parse_jsonl(shared_dir / "active.jsonl")
-    found = set()
-    for m in msgs:
-        if m.get("from"):
-            found.add(m["from"])
-    palette = ["#ff6b6b", "#4ecdc4", "#ffd93d", "#a29bfe", "#fd79a8", "#00cec9"]
-    agents = {}
-    for i, aid in enumerate(sorted(found)):
-        agents[aid] = {
-            "id": aid,
-            "display_name": aid.capitalize(),
-            "color": palette[i % len(palette)],
-            "cursor": "line",
-            "filter_from": "",
-            "wakeup": {"url": "", "method": "POST", "body_template": {"message": "{{message}}"}},
-        }
-    if agents:
-        return agents
-    agents = {
+def _default_wakeup():
+    return {
+        "url": "",
+        "method": "POST",
+        "headers": {"Content-Type": "application/json"},
+        "body_template": {"message": "{{message}}"},
+    }
+
+
+def sample_agents():
+    return {
         "alice": {
             "id": "alice",
             "display_name": "Alice",
             "color": "#ff6b6b",
             "cursor": "line",
             "filter_from": "bob",
-            "wakeup": {
-                "url": "",
-                "method": "POST",
-                "headers": {"Content-Type": "application/json"},
-                "body_template": {"message": "{{message}}"},
-            },
+            "sample": True,
+            "wakeup": _default_wakeup(),
         },
         "bob": {
             "id": "bob",
@@ -96,15 +83,35 @@ def default_agents(shared_dir):
             "color": "#4ecdc4",
             "cursor": "line",
             "filter_from": "alice",
-            "wakeup": {
-                "url": "",
-                "method": "POST",
-                "headers": {"Content-Type": "application/json"},
-                "body_template": {"message": "{{message}}"},
-            },
+            "sample": True,
+            "wakeup": _default_wakeup(),
         },
     }
-    return agents
+
+
+def agent_from_discovery(item, color, peers):
+    aid = item["id"]
+    return {
+        "id": aid,
+        "display_name": item.get("display_name", aid),
+        "color": color,
+        "cursor": "line",
+        "filter_from": peers[0] if len(peers) == 1 else "",
+        "wakeup": item.get("wakeup") or _default_wakeup(),
+    }
+
+
+def default_agents(shared_dir):
+    palette = ["#ff6b6b", "#4ecdc4", "#ffd93d", "#a29bfe", "#fd79a8", "#00cec9"]
+    agents = {}
+    discovered = discover_local_agents(shared_dir, include_bridge_config=False)
+    ids = [a["id"] for a in discovered]
+    for i, item in enumerate(discovered):
+        peers = [aid for aid in ids if aid != item["id"]]
+        agents[item["id"]] = agent_from_discovery(item, palette[i % len(palette)], peers)
+    if agents:
+        return agents
+    return sample_agents()
 
 
 def _read_yaml_file(path):
@@ -139,7 +146,7 @@ def _discovered_agent(agent_id, display_name, kind, source, details="", wakeup=N
     return item
 
 
-def discover_local_agents(shared_dir):
+def discover_local_agents(shared_dir, include_bridge_config=True):
     """Return likely local AI agents without modifying bridge.yaml.
 
     The scan is intentionally shallow: it checks known per-user config
@@ -165,17 +172,22 @@ def discover_local_agents(shared_dir):
                 "active.jsonl 中出现过的发送者",
             ))
 
-    cfg, cfg_path = read_bridge(shared)
-    for key, agent in cfg.get("agents", {}).items():
-        aid = agent.get("id", key)
-        add(_discovered_agent(
-            aid,
-            agent.get("display_name", aid),
-            "Bridge 配置",
-            cfg_path,
-            "当前 bridge.yaml 中已配置",
-            agent.get("wakeup", {}),
-        ))
+    if include_bridge_config:
+        cfg, cfg_path = read_bridge(shared)
+        for key, agent in cfg.get("agents", {}).items():
+            aid = agent.get("id", key)
+            item = _discovered_agent(
+                aid,
+                agent.get("display_name", aid),
+                "Bridge 配置",
+                cfg_path,
+                "当前 bridge.yaml 中已配置",
+                agent.get("wakeup", {}),
+            )
+            if agent.get("sample"):
+                item["sample"] = True
+                item["details"] = "示例 Agent，尚未连接真实程序"
+            add(item)
 
     # Hermes Agent.
     hermes_config = home / ".hermes" / "config.yaml"
@@ -468,6 +480,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 "color": a.get("color", "#8888a0"),
                 "cursor": a.get("cursor", "line"),
                 "filter_from": a.get("filter_from", ""),
+                "sample": bool(a.get("sample")),
                 "wakeup": a.get("wakeup", {}),
             })
         self.send_json({

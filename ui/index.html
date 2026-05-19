@@ -253,6 +253,11 @@ body {
   border-color: rgba(78,205,196,0.35);
   background: rgba(78,205,196,0.08);
 }
+.discover-pill.sample {
+  color: var(--amber);
+  border-color: rgba(255,217,61,0.35);
+  background: rgba(255,217,61,0.08);
+}
 .discover-meta {
   color: var(--text3);
   font-size: 0.74em;
@@ -821,6 +826,10 @@ function getConfigIssues(data) {
   for (const a of agents) {
     const name = a.display_name || a.id || '未命名 Agent';
     if (!a.id) issues.push(`${name}: Agent ID 不能为空`);
+    if (a.sample) {
+      issues.push(`${name}: 示例 Agent，需替换为真实 Agent`);
+      continue;
+    }
     if (!a.wakeup || !a.wakeup.url) issues.push(`${name}: 填写 Webhook URL`);
     if (!a.wakeup || !a.wakeup.body_template) issues.push(`${name}: 确认消息体模板`);
   }
@@ -849,7 +858,7 @@ function renderBadges() {
   for (const a of state.agents) {
     const el = document.createElement('div');
     el.className = 'agent-badge'; el.dataset.agentId = a.id;
-    el.innerHTML = `<span class="agent-dot" style="background:${a.color}"></span><span>${esc(a.display_name||a.id)}</span>`;
+    el.innerHTML = `<span class="agent-dot" style="background:${a.color}"></span><span>${esc(a.display_name||a.id)}</span>${a.sample ? '<span class="discover-pill sample">示例</span>' : ''}`;
     el.addEventListener('click', e => { e.stopPropagation(); openEditPopup(el, a); });
     badgeContainer.appendChild(el);
   }
@@ -867,6 +876,7 @@ async function renderCards() {
         <span class="agent-card-name" style="color:${a.color}">${esc(a.display_name || a.id)}</span>
       </div>
       <div class="agent-card-row"><span class="label">ID</span><span class="val">${esc(a.id)}</span></div>
+      ${a.sample ? '<div class="agent-card-row"><span class="label">状态</span><span class="val warn">示例 Agent</span></div>' : ''}
       <div class="agent-card-row"><span class="label">来自</span><span class="val">${esc(a.filter_from || '—')}</span></div>
       <div class="agent-card-row"><span class="label">游标</span><span class="val">${esc(a.cursor || 'line')}</span></div>
       <div class="agent-card-row">
@@ -900,8 +910,8 @@ function renderDiscoveredAgents() {
   for (const a of agents) {
     const card = document.createElement('div');
     card.className = 'discover-card';
-    const status = a.configured ? '已配置' : '未配置';
-    const statusClass = a.configured ? ' configured' : '';
+    const status = a.sample ? '示例' : (a.configured ? '已配置' : '未配置');
+    const statusClass = a.sample ? ' sample' : (a.configured ? ' configured' : '');
     card.innerHTML = `
       <div class="discover-card-header">
         <span class="discover-name">${esc(a.display_name || a.id)}</span>
