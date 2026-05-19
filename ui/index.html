@@ -699,6 +699,8 @@ body {
 }
 .wakeup-field textarea { min-height: 44px; resize: vertical; font-family: var(--font); font-size: 0.72em; }
 
+	.wakeup-field .field-error { border-color: var(--red) !important; }
+
 /* Header key-value rows */
 .kv-row {
   display: flex; gap: 4px; align-items: center; margin-bottom: 3px;
@@ -1487,6 +1489,23 @@ async function loadActivity() {
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function escAttr(s) { return esc(s); }
 
+// ═══ Toast notification ═══
+function toast(msg, type) {
+  const existing = document.querySelector('.toast-container');
+  const container = existing || (() => {
+    const c = document.createElement('div');
+    c.className = 'toast-container';
+    c.style.cssText = 'position:fixed;top:16px;right:16px;z-index:999;display:flex;flex-direction:column;gap:8px;max-width:360px';
+    document.body.appendChild(c);
+    return c;
+  })();
+  const el = document.createElement('div');
+  el.style.cssText = `padding:10px 16px;border-radius:var(--radius-sm,5px);font-size:0.82em;font-family:var(--font-ui);animation:fadeIn 0.2s ease;box-shadow:0 4px 16px rgba(0,0,0,0.3);background:var(--surface2,#1a1a2e);border:1px solid var(--border,#1e1e32);color:var(--text2,#8888a0);border-left:3px solid ${type === 'error' ? 'var(--red,#ff6b6b)' : 'var(--green,#4ecdc4)'}`;
+  el.textContent = msg;
+  container.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(() => el.remove(), 300); }, 3000);
+}
+
 function bodyTemplateToText(bt) {
   if (!bt) return '{}';
   if (typeof bt === 'string') return bt;
@@ -1645,9 +1664,17 @@ function collectAgentData(container) {
 async function testAgent(btn) {
   const card = btn.closest('.agent-config');
   if (!card) return;
+  // Clear previous field errors
+  card.querySelectorAll('.field-error').forEach(el => el.classList.remove('field-error'));
   const data = collectAgentData(card);
   if (!data.wakeup || !data.wakeup.url) {
     toast('请先配置 Webhook URL', 'error');
+    const urlField = card.querySelector('.wu-url');
+    if (urlField) {
+      urlField.classList.add('field-error');
+      urlField.scrollIntoView({behavior:'smooth', block:'center'});
+      urlField.focus();
+    }
     return;
   }
   const agentName = data.display_name || data.id || 'Agent';
