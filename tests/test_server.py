@@ -15,13 +15,14 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+from unittest.mock import patch
 from pathlib import Path
 
 # 将 core/ 和 ui/ 加入 import 路径
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ui"))
 
-from server import BridgeHandler, PollManager, find_shared_dir, read_bridge
+from server import BridgeHandler, PollManager, discover_local_agents, find_shared_dir, read_bridge
 
 
 def get_free_port():
@@ -142,6 +143,45 @@ class TestDefaultConfig(unittest.TestCase):
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
+    def test_discover_local_agents_uses_known_local_configs(self):
+        tmpdir = Path(tempfile.mkdtemp(prefix="agent-bridge-discover-"))
+        home = tmpdir / "home"
+        shared = tmpdir / "shared"
+        try:
+            home.mkdir()
+            shared.mkdir()
+            (shared / "active.jsonl").write_text(
+                json.dumps({"from": "momo", "msg": "hello"}) + "\n",
+                encoding="utf-8",
+            )
+            (home / ".hermes").mkdir()
+            (home / ".hermes" / "config.yaml").write_text(
+                "platforms:\n"
+                "  webhook:\n"
+                "    extra:\n"
+                "      host: 127.0.0.1\n"
+                "      port: 8644\n"
+                "      routes:\n"
+                "        agent-reply: {}\n",
+                encoding="utf-8",
+            )
+            (home / ".openclaw").mkdir()
+            (home / ".openclaw" / "openclaw.json").write_text("{}", encoding="utf-8")
+            (home / ".codex").mkdir()
+
+            with patch("pathlib.Path.home", return_value=home):
+                agents = discover_local_agents(shared)
+
+            ids = {a["id"] for a in agents}
+            self.assertIn("momo", ids)
+            self.assertIn("hermes", ids)
+            self.assertIn("openclaw", ids)
+            self.assertIn("codex", ids)
+            hermes = next(a for a in agents if a["id"] == "hermes")
+            self.assertEqual(hermes["wakeup"]["url"], "http://127.0.0.1:8644/webhooks/agent-reply")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
 
 class TestServeStatic(TestServerBase):
     """静态文件服务 + 路径遍历防护。"""
@@ -190,6 +230,19 @@ class TestConfigAPI(TestServerBase):
         self.assertTrue(data["ok"])
         self.assertIn("agents", data)
         self.assertEqual(len(data["agents"]), 2)
+
+    def test_discover_agents_endpoint(self):
+        """GET /api/agents/discover 返回本机发现的 Agent。"""
+        status, data = self._get("/api/agents/discover")
+        self.assertEqual(status, 200)
+        self.assertTrue(data["ok"])
+        self.assertIn("agents", data)
+        ids = {a["id"] for a in data["agents"]}
+        self.assertIn("alice", ids)
+        self.assertIn("bob", ids)
+        for a in data["agents"]:
+            if a["id"] in ("alice", "bob"):
+                self.assertTrue(a["configured"])
 
     def test_update_config_full(self):
         """PUT /api/config/full 保存完整配置。"""

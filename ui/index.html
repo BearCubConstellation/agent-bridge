@@ -195,6 +195,77 @@ body {
   justify-content: flex-start;
   margin-bottom: 12px;
 }
+.agent-section {
+  margin-bottom: 18px;
+}
+.agent-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.agent-section-title {
+  color: var(--text3);
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.scan-btn {
+  background: var(--surface2); border: 1px solid var(--border); color: var(--text2);
+  padding: 5px 10px; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 0.76em; transition: all 0.15s; font-family: var(--font-ui);
+}
+.scan-btn:hover { border-color: var(--text3); color: var(--text); background: var(--surface3); }
+.discover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.discover-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+}
+.discover-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.discover-name {
+  font-weight: 600;
+  font-size: 0.86em;
+}
+.discover-pill {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text3);
+  font-size: 0.68em;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+.discover-pill.configured {
+  color: var(--green);
+  border-color: rgba(78,205,196,0.35);
+  background: rgba(78,205,196,0.08);
+}
+.discover-meta {
+  color: var(--text3);
+  font-size: 0.74em;
+  line-height: 1.45;
+  word-break: break-word;
+}
+.discover-empty {
+  color: var(--text3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  font-size: 0.82em;
+}
 
 .config-banner {
   display: none; background: rgba(255,217,61,0.08); border-bottom: 1px solid rgba(255,217,61,0.18);
@@ -534,6 +605,7 @@ body {
   .tab-pane { padding: 12px; }
   .msg-bubble { max-width: 85%; }
   .cards-bar { grid-template-columns: 1fr; }
+  .discover-grid { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -547,7 +619,7 @@ body {
   <div class="tab-bar" aria-label="主导航">
     <button class="tab-btn active" data-tab="chat">💬 聊天</button>
     <button class="tab-btn" data-tab="activity">📡 活动</button>
-    <button class="tab-btn" data-tab="agent">◎ Agent</button>
+    <button class="tab-btn" data-tab="agent">Agent</button>
     <button class="tab-btn" data-tab="settings">⚙ 设置</button>
   </div>
   <div class="header-right">
@@ -588,8 +660,20 @@ body {
   <!-- ═══ Agent pane ═══ -->
   <div class="tab-pane" id="pane-agent">
     <div class="agent-area">
-      <div class="badge-list agent-page-badges" id="agentBadgeContainer"></div>
-      <div class="cards-bar" id="cardsBar"></div>
+      <div class="agent-section">
+        <div class="agent-section-header">
+          <div class="agent-section-title">已配置</div>
+        </div>
+        <div class="badge-list agent-page-badges" id="agentBadgeContainer"></div>
+        <div class="cards-bar" id="cardsBar"></div>
+      </div>
+      <div class="agent-section">
+        <div class="agent-section-header">
+          <div class="agent-section-title">本机发现</div>
+          <button class="scan-btn" id="scanAgentsBtn" type="button">重新扫描</button>
+        </div>
+        <div class="discover-grid" id="discoveredAgents"></div>
+      </div>
     </div>
   </div>
 
@@ -637,6 +721,7 @@ const VALID_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
 let state = {
   messages: [], agents: [], agentIds: [], agentMap: {}, agentAlias: {},
+  discoveredAgents: null,
   archive: '__active__', searchQuery: '',
   autoRefresh: true, pollInterval: null, pollStatusTimer: null,
   editingBadge: null, popupCloseHandler: null,
@@ -651,6 +736,8 @@ const refreshBtn = $('#refreshBtn');
 const archiveBtn = $('#archiveBtn');
 const cardsBar = $('#cardsBar');
 const badgeContainer = $('#agentBadgeContainer');
+const discoveredAgents = $('#discoveredAgents');
+const scanAgentsBtn = $('#scanAgentsBtn');
 const composeAgent = $('#composeAgent');
 const composeInput = $('#composeInput');
 const composeBtn = $('#composeBtn');
@@ -790,6 +877,43 @@ async function renderCards() {
   }
 }
 
+async function loadDiscoveredAgents() {
+  if (!discoveredAgents) return;
+  discoveredAgents.innerHTML = '<div class="discover-empty">扫描中…</div>';
+  const data = await apiGet('/api/agents/discover');
+  if (!data || !data.ok) {
+    discoveredAgents.innerHTML = '<div class="discover-empty">扫描失败</div>';
+    return;
+  }
+  state.discoveredAgents = data.agents || [];
+  renderDiscoveredAgents();
+}
+
+function renderDiscoveredAgents() {
+  if (!discoveredAgents) return;
+  const agents = state.discoveredAgents || [];
+  if (!agents.length) {
+    discoveredAgents.innerHTML = '<div class="discover-empty">未发现本机 Agent</div>';
+    return;
+  }
+  discoveredAgents.innerHTML = '';
+  for (const a of agents) {
+    const card = document.createElement('div');
+    card.className = 'discover-card';
+    const status = a.configured ? '已配置' : '未配置';
+    const statusClass = a.configured ? ' configured' : '';
+    card.innerHTML = `
+      <div class="discover-card-header">
+        <span class="discover-name">${esc(a.display_name || a.id)}</span>
+        <span class="discover-pill${statusClass}">${status}</span>
+      </div>
+      <div class="discover-meta">${esc(a.kind || 'Agent')} · ${esc(a.id)}</div>
+      <div class="discover-meta">${esc(a.details || '')}</div>
+      <div class="discover-meta">${esc(a.source || '')}</div>`;
+    discoveredAgents.appendChild(card);
+  }
+}
+
 // ═══ Compose select ═══
 function renderComposeSelect() {
   composeAgent.innerHTML = '';
@@ -803,6 +927,7 @@ function renderComposeSelect() {
 
 composeInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
 composeBtn.addEventListener('click', sendMessage);
+if (scanAgentsBtn) scanAgentsBtn.addEventListener('click', loadDiscoveredAgents);
 
 async function sendMessage() {
   const aid = composeAgent.value;
@@ -1363,6 +1488,7 @@ async function saveFullConfig() {
     status.textContent = '✓ 配置已保存';
     status.className = 'save-status ok';
     await loadConfig(); // Refresh badges and cards
+    await loadDiscoveredAgents();
     setTimeout(() => { status.textContent = ''; }, 3000);
   } else {
     status.textContent = '保存失败: ' + (r?.error || '服务器错误');
@@ -1402,6 +1528,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     state.activeTab = btn.dataset.tab;
     // Lazy load
     if (btn.dataset.tab === 'activity') loadActivity();
+    if (btn.dataset.tab === 'agent' && state.discoveredAgents === null) loadDiscoveredAgents();
     if (btn.dataset.tab === 'settings') loadSettings();
   });
 });
@@ -1452,6 +1579,7 @@ function checkProtocol() {
 if (checkProtocol()) {
   (async function init() {
     await loadConfig();
+    await loadDiscoveredAgents();
     await loadArchives();
     await refreshAll();
     startAutoRefresh();

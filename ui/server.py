@@ -107,6 +107,138 @@ def default_agents(shared_dir):
     return agents
 
 
+def _read_yaml_file(path):
+    try:
+        import yaml
+    except ImportError:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+
+def _agent_source(path):
+    try:
+        return str(path.expanduser())
+    except Exception:
+        return str(path)
+
+
+def _discovered_agent(agent_id, display_name, kind, source, details="", wakeup=None):
+    item = {
+        "id": agent_id,
+        "display_name": display_name,
+        "kind": kind,
+        "source": _agent_source(source),
+        "details": details,
+    }
+    if wakeup:
+        item["wakeup"] = wakeup
+    return item
+
+
+def discover_local_agents(shared_dir):
+    """Return likely local AI agents without modifying bridge.yaml.
+
+    The scan is intentionally shallow: it checks known per-user config
+    locations and bridge message history, avoiding broad filesystem walks.
+    """
+    shared = Path(shared_dir)
+    home = Path.home()
+    found = {}
+
+    def add(item):
+        if validate_agent_id(item["id"]):
+            found.setdefault(item["id"], item)
+
+    # Agents already participating in the current bridge conversation.
+    for m in parse_jsonl(shared / "active.jsonl"):
+        aid = str(m.get("from", "")).strip()
+        if aid:
+            add(_discovered_agent(
+                aid,
+                aid.capitalize(),
+                "Bridge 消息",
+                shared / "active.jsonl",
+                "active.jsonl 中出现过的发送者",
+            ))
+
+    cfg, cfg_path = read_bridge(shared)
+    for key, agent in cfg.get("agents", {}).items():
+        aid = agent.get("id", key)
+        add(_discovered_agent(
+            aid,
+            agent.get("display_name", aid),
+            "Bridge 配置",
+            cfg_path,
+            "当前 bridge.yaml 中已配置",
+            agent.get("wakeup", {}),
+        ))
+
+    # Hermes Agent.
+    hermes_config = home / ".hermes" / "config.yaml"
+    if hermes_config.exists():
+        cfg = _read_yaml_file(hermes_config)
+        webhook = ((cfg.get("platforms") or {}).get("webhook") or {})
+        extra = webhook.get("extra") or {}
+        host = extra.get("host", "127.0.0.1")
+        port = extra.get("port", 8644)
+        routes = extra.get("routes") or {}
+        route = "agent-reply" if "agent-reply" in routes else (next(iter(routes), "agent-reply"))
+        add(_discovered_agent(
+            "hermes",
+            "Hermes Agent",
+            "Hermes",
+            hermes_config,
+            "检测到 ~/.hermes/config.yaml",
+            {
+                "url": f"http://{host}:{port}/webhooks/{route}",
+                "method": "POST",
+                "body_template": {"message": "{{message}}"},
+            },
+        ))
+    elif (home / ".hermes").exists():
+        add(_discovered_agent("hermes", "Hermes Agent", "Hermes", home / ".hermes", "检测到 ~/.hermes 目录"))
+
+    # OpenClaw.
+    openclaw_config = home / ".openclaw" / "openclaw.json"
+    if openclaw_config.exists() or (home / ".openclaw").exists():
+        add(_discovered_agent(
+            "openclaw",
+            "OpenClaw",
+            "OpenClaw",
+            openclaw_config if openclaw_config.exists() else home / ".openclaw",
+            "检测到 OpenClaw 本地配置",
+            {
+                "url": "http://127.0.0.1:18789/tools/invoke",
+                "method": "POST",
+                "auth": {
+                    "type": "bearer",
+                    "token_path": "~/.openclaw/openclaw.json",
+                    "token_jsonpath": "gateway.auth.password",
+                },
+                "body_template": {
+                    "tool": "sessions_send",
+                    "args": {"sessionKey": "agent:main:main", "message": "{{message}}"},
+                },
+            },
+        ))
+
+    known_dirs = [
+        ("claude-code", "Claude Code", "Claude", home / ".claude"),
+        ("codex", "Codex", "Codex", home / ".codex"),
+        ("gemini", "Gemini CLI", "Gemini", home / ".gemini"),
+        ("qwen", "Qwen Code", "Qwen", home / ".qwen"),
+    ]
+    for aid, name, kind, path in known_dirs:
+        if path.exists():
+            add(_discovered_agent(aid, name, kind, path, f"检测到 {path.name} 目录"))
+
+    return sorted(found.values(), key=lambda x: (x["kind"].lower(), x["id"].lower()))
+
+
 def read_bridge(shared_dir):
     config_path = Path(shared_dir) / BRIDGE_FILENAME
     cfg = None
@@ -261,6 +393,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         routes = {
             "/": lambda: self.serve_static("index.html"),
             "/api/config": self.handle_get_config,
+            "/api/agents/discover": self.handle_discover_agents,
             "/api/messages": lambda: self.handle_messages(parsed.query),
             "/api/status": self.handle_status,
             "/api/poll": self.handle_poll_status,
@@ -343,6 +476,19 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "agent_id": cfg.get("agent_id", ""),
             "agents": agents_list,
             "active_exists": (shared / "active.jsonl").exists(),
+        })
+
+    def handle_discover_agents(self):
+        shared = Path(self.shared_dir)
+        cfg, _ = read_bridge(shared)
+        configured = {a.get("id", key) for key, a in cfg.get("agents", {}).items()}
+        discovered = discover_local_agents(shared)
+        for item in discovered:
+            item["configured"] = item["id"] in configured
+        self.send_json({
+            "ok": True,
+            "agents": discovered,
+            "count": len(discovered),
         })
 
     # ─── POST /api/config ───────────────────────────
