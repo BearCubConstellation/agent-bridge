@@ -15,6 +15,7 @@ import http.server
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -41,6 +42,46 @@ def is_relative_to(path, parent):
         return True
     except ValueError:
         return False
+
+
+def open_in_file_manager(path):
+    target = Path(path)
+    try:
+        if os.name == "nt" and hasattr(os, "startfile"):
+            os.startfile(str(target))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(
+                ["open", str(target)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            subprocess.Popen(
+                ["xdg-open", str(target)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        return True, None
+    except Exception as exc:
+        return False, str(exc)
+
+
+def resolve_chat_folder(shared_dir, archive_name):
+    shared = Path(shared_dir)
+    if not archive_name or archive_name == "__active__":
+        return shared
+
+    filename = Path(str(archive_name)).name
+    if not filename.endswith(".jsonl"):
+        raise ValueError("Only .jsonl archive files are allowed")
+
+    history_root = (shared / "history").resolve()
+    archive_path = (shared / "history" / filename).resolve()
+    if not is_relative_to(archive_path, history_root):
+        raise ValueError("invalid archive name")
+    if not archive_path.exists():
+        raise FileNotFoundError(filename)
+    return archive_path.parent
 
 
 # ─── 配置 ─────────────────────────────────────────────
@@ -424,6 +465,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "/api/config": self.handle_update_config,
             "/api/config/full": self.handle_update_config_full,
             "/api/archive": self.handle_archive,
+            "/api/open-current-folder": self.handle_open_current_folder,
             "/api/poll/now": self.handle_poll_now,
             "/api/poll/start": self.handle_poll_start,
             "/api/poll/stop": self.handle_poll_stop,
@@ -652,6 +694,32 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json({"ok": True, "archived_to": name, "message_count": len(msgs)})
         else:
             self.send_json({"ok": False, "error": "archive failed"})
+
+    # ─── POST /api/open-current-folder ───────────────────
+
+    def handle_open_current_folder(self):
+        body, err = self._read_json_body()
+        if err:
+            self.send_json(err)
+            return
+
+        archive_name = body.get("archive", "__active__")
+        shared = Path(self.shared_dir)
+        try:
+            folder = resolve_chat_folder(shared, archive_name)
+        except FileNotFoundError:
+            self.send_json({"ok": False, "error": "archive file not found"})
+            return
+        except ValueError as exc:
+            self.send_json({"ok": False, "error": str(exc)})
+            return
+
+        ok, error = open_in_file_manager(folder)
+        if not ok:
+            self.send_json({"ok": False, "error": error or "failed to open folder"})
+            return
+
+        self.send_json({"ok": True, "path": str(folder)})
 
     # ─── Poll API ───────────────────────────────────
 

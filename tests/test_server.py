@@ -390,6 +390,49 @@ class TestMessageAPI(TestServerBase):
         self.assertIsInstance(data.get("messages", []), list)
 
 
+class TestOpenCurrentFolderAPI(TestServerBase):
+    """打开当前对话目录 API 绔偣銆?"""
+
+    @patch("server.open_in_file_manager", return_value=(True, None))
+    def test_open_active_folder(self, mock_open):
+        """POST /api/open-current-folder 打开当前对话所在目录。"""
+        status, data = self._post("/api/open-current-folder", {
+            "archive": "__active__",
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(data["ok"])
+        self.assertEqual(Path(mock_open.call_args.args[0]), self.tmpdir)
+
+    @patch("server.open_in_file_manager", return_value=(True, None))
+    def test_open_archive_folder(self, mock_open):
+        """POST /api/open-current-folder 打开归档对话所在目录。"""
+        history_dir = self.tmpdir / "history"
+        history_dir.mkdir(parents=True, exist_ok=True)
+        archive = history_dir / "2026-01-01_1200.jsonl"
+        archive.write_text(
+            json.dumps({"ts": "2026-01-01 12:00:00", "from": "alice", "msg": "hi"}) + "\n",
+            encoding="utf-8",
+        )
+
+        status, data = self._post("/api/open-current-folder", {
+            "archive": archive.name,
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(data["ok"])
+        self.assertEqual(Path(mock_open.call_args.args[0]), history_dir)
+
+    @patch("server.open_in_file_manager", return_value=(True, None))
+    def test_open_current_folder_rejects_traversal_archive(self, mock_open):
+        """POST /api/open-current-folder 拒绝目录穿越文件名。"""
+        status, data = self._post("/api/open-current-folder", {
+            "archive": "../../etc/passwd",
+        })
+        self.assertEqual(status, 200)
+        self.assertFalse(data["ok"])
+        self.assertIn("archive", data["error"])
+        mock_open.assert_not_called()
+
+
 class TestArchiveAPI(TestServerBase):
     """归档 API 端点。"""
 

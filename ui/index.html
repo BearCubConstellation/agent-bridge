@@ -739,6 +739,14 @@ const searchInput = $('#searchInput');
 const archiveSelect = $('#archiveSelect');
 const refreshBtn = $('#refreshBtn');
 const archiveBtn = $('#archiveBtn');
+const chatControls = document.querySelector('.chat-controls');
+const openFolderBtn = document.createElement('button');
+openFolderBtn.className = 'tool-btn';
+openFolderBtn.id = 'openFolderBtn';
+openFolderBtn.type = 'button';
+openFolderBtn.title = '打开当前对话目录';
+openFolderBtn.textContent = '📂 目录';
+if (chatControls && refreshBtn) chatControls.insertBefore(openFolderBtn, refreshBtn);
 const cardsBar = $('#cardsBar');
 const badgeContainer = $('#agentBadgeContainer');
 const discoveredAgents = $('#discoveredAgents');
@@ -1102,12 +1110,25 @@ searchInput.addEventListener('input', () => {
 });
 archiveSelect.addEventListener('change', () => { state.archive = archiveSelect.value; loadMessages(); });
 refreshBtn.addEventListener('click', refreshAll);
+openFolderBtn.addEventListener('click', openCurrentConversationFolder);
 
 archiveBtn.addEventListener('click', async () => {
   if (!confirm('归档当前对话？')) return;
   const r = await apiPost('/api/archive', {});
   if (r && r.ok) { await loadArchives(); await refreshAll(); }
 });
+
+async function openCurrentConversationFolder() {
+  openFolderBtn.disabled = true;
+  try {
+    const r = await apiPost('/api/open-current-folder', {archive: state.archive});
+    if (!r || !r.ok) {
+      alert((r && r.error) || '无法打开当前对话目录');
+    }
+  } finally {
+    openFolderBtn.disabled = false;
+  }
+}
 
 async function loadArchives() {
   const data = await apiGet('/api/status');
