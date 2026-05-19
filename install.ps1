@@ -127,17 +127,28 @@ function Main {
 
     # --- Install Python dependencies ---
     Write-Info "Installing Python dependencies..."
+    $pipOutput = $null
+    $pipExitCode = 0
+    $oldErrorActionPreference = $ErrorActionPreference
     try {
-        & $pythonInfo.Source @($pythonInfo.Args) -m pip --disable-pip-version-check install --user -r "$SrcDir\requirements.txt"
+        $ErrorActionPreference = "Continue"
+        $pipOutput = & $pythonInfo.Source @($pythonInfo.Args) -m pip --disable-pip-version-check install --user -r "$SrcDir\requirements.txt" 2>&1
+        $pipExitCode = $LASTEXITCODE
     } catch {
-        Write-Err "Python dependency installation failed"
-        Write-Host ""
-        Write-Host "    Try manually:"
-        Write-Host "      $pythonCmd -m pip --disable-pip-version-check install --user -r `"$SrcDir\requirements.txt`""
-        return
+        $pipOutput = $_
+        $pipExitCode = 1
+    } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
     }
-    if ($LASTEXITCODE -ne 0) {
+    if ($pipExitCode -ne 0) {
         Write-Err "Python dependency installation failed"
+        if ($pipOutput) {
+            Write-Host ""
+            Write-Host "    pip output:"
+            ($pipOutput | Out-String).TrimEnd() -split "`r?`n" | ForEach-Object {
+                Write-Host "      $_"
+            }
+        }
         Write-Host ""
         Write-Host "    Try manually:"
         Write-Host "      $pythonCmd -m pip --disable-pip-version-check install --user -r `"$SrcDir\requirements.txt`""

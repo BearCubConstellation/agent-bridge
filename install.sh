@@ -134,13 +134,18 @@ check_python
 download
 
 info "Installing Python dependencies..."
-if ! "$PY" -m pip --disable-pip-version-check install --user -r "$SRC_DIR/requirements.txt"; then
+PIP_OUTPUT=$("$PY" -m pip --disable-pip-version-check install --user -r "$SRC_DIR/requirements.txt" 2>&1) || {
     err "Python dependency installation failed"
+    if [ -n "$PIP_OUTPUT" ]; then
+        echo ""
+        echo "    pip output:"
+        printf '%s\n' "$PIP_OUTPUT" | sed 's/^/      /'
+    fi
     echo ""
     echo "    Try manually:"
     echo "      $PY -m pip --disable-pip-version-check install --user -r $SRC_DIR/requirements.txt"
     exit 1
-fi
+}
 ok "Dependencies installed"
 
 install_cli
