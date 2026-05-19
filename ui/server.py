@@ -314,7 +314,7 @@ def discover_local_agents(shared_dir, include_bridge_config=True):
                 "method": "POST",
                 "auth": {
                     "type": "bearer",
-                    "token_path": "~/.openclaw/openclaw.json",
+                    "token_path": str(home / ".openclaw" / "openclaw.json"),
                     "token_jsonpath": "gateway.auth.password",
                 },
                 "body_template": {
