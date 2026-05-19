@@ -108,6 +108,24 @@ def find_shared_dir():
 from poll import parse_jsonl  # noqa: E402
 
 
+def _classify_conn_error(detail, url):
+    """将底层连接错误翻译为用户友好的中文提示。"""
+    d = detail.lower()
+    if "10061" in d or "connection refused" in d or "errno 111" in d:
+        return "连接被拒绝：目标服务未启动，或端口号填写错误"
+    if "timed out" in d or "10060" in d or "errno 110" in d:
+        return "连接超时：请检查目标地址是否正确、网络是否通畅"
+    if "name or service not known" in d or "11001" in d or "getaddrinfo" in d:
+        return "无法解析主机名：请检查 URL 中的地址是否正确"
+    if detail.startswith("HTTP "):
+        code = detail.split("HTTP ", 1)[1].split(":")[0].strip()
+        reasons = {"401": "认证失败（401），请检查认证配置", "403": "无权限访问（403）",
+                   "404": "路径不存在（404），请检查 URL 路径是否正确",
+                   "500": "服务端内部错误（500）", "502": "网关错误（502），上游服务不可用"}
+        return reasons.get(code, f"服务已连通但返回错误（HTTP {code}）")
+    return detail
+
+
 def _default_wakeup():
     return {
         "url": "",
@@ -964,7 +982,8 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         if success:
             self.send_json({"ok": True, "status": detail})
         else:
-            self.send_json({"ok": False, "error": detail})
+            msg = _classify_conn_error(detail, url)
+            self.send_json({"ok": False, "error": msg, "raw": detail})
 
     def handle_bridge_yaml(self):
         shared = Path(self.shared_dir)
