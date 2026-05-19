@@ -401,7 +401,8 @@ class TestOpenCurrentFolderAPI(TestServerBase):
         })
         self.assertEqual(status, 200)
         self.assertTrue(data["ok"])
-        self.assertEqual(Path(mock_open.call_args.args[0]), self.tmpdir)
+        self.assertEqual(Path(mock_open.call_args.args[0]), self.tmpdir / "active.jsonl")
+        self.assertTrue(mock_open.call_args.kwargs["select"])
 
     @patch("server.open_in_file_manager", return_value=(True, None))
     def test_open_archive_folder(self, mock_open):
@@ -419,7 +420,8 @@ class TestOpenCurrentFolderAPI(TestServerBase):
         })
         self.assertEqual(status, 200)
         self.assertTrue(data["ok"])
-        self.assertEqual(Path(mock_open.call_args.args[0]), history_dir)
+        self.assertEqual(Path(mock_open.call_args.args[0]), archive)
+        self.assertTrue(mock_open.call_args.kwargs["select"])
 
     @patch("server.open_in_file_manager", return_value=(True, None))
     def test_open_current_folder_rejects_traversal_archive(self, mock_open):

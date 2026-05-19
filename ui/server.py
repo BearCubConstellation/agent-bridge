@@ -44,18 +44,27 @@ def is_relative_to(path, parent):
         return False
 
 
-def open_in_file_manager(path):
+def open_in_file_manager(path, select=False):
     target = Path(path)
+    target_exists = target.exists()
     try:
         if os.name == "nt" and hasattr(os, "startfile"):
-            os.startfile(str(target))  # type: ignore[attr-defined]
+            if select and target_exists and target.is_file():
+                subprocess.Popen(
+                    ["explorer.exe", "/select,", str(target)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                os.startfile(str(target if target_exists else target.parent))  # type: ignore[attr-defined]
         elif sys.platform == "darwin":
-            subprocess.Popen(
-                ["open", str(target)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            if select and target_exists and target.is_file():
+                cmd = ["open", "-R", str(target)]
+            else:
+                cmd = ["open", str(target if target_exists else target.parent)]
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
+            target = target if target_exists and not target.is_file() else target.parent
             subprocess.Popen(
                 ["xdg-open", str(target)],
                 stdout=subprocess.DEVNULL,
@@ -66,10 +75,10 @@ def open_in_file_manager(path):
         return False, str(exc)
 
 
-def resolve_chat_folder(shared_dir, archive_name):
+def resolve_chat_file(shared_dir, archive_name):
     shared = Path(shared_dir)
     if not archive_name or archive_name == "__active__":
-        return shared
+        return shared / "active.jsonl"
 
     filename = Path(str(archive_name)).name
     if not filename.endswith(".jsonl"):
@@ -81,7 +90,7 @@ def resolve_chat_folder(shared_dir, archive_name):
         raise ValueError("invalid archive name")
     if not archive_path.exists():
         raise FileNotFoundError(filename)
-    return archive_path.parent
+    return archive_path
 
 
 # ─── 配置 ─────────────────────────────────────────────
@@ -706,7 +715,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         archive_name = body.get("archive", "__active__")
         shared = Path(self.shared_dir)
         try:
-            folder = resolve_chat_folder(shared, archive_name)
+            chat_file = resolve_chat_file(shared, archive_name)
         except FileNotFoundError:
             self.send_json({"ok": False, "error": "archive file not found"})
             return
@@ -714,12 +723,12 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json({"ok": False, "error": str(exc)})
             return
 
-        ok, error = open_in_file_manager(folder)
+        ok, error = open_in_file_manager(chat_file, select=True)
         if not ok:
             self.send_json({"ok": False, "error": error or "failed to open folder"})
             return
 
-        self.send_json({"ok": True, "path": str(folder)})
+        self.send_json({"ok": True, "path": str(chat_file)})
 
     # ─── Poll API ───────────────────────────────────
 
