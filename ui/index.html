@@ -1378,12 +1378,53 @@ async function assignAgentToRoom(roomId, slotIndex, agentId) {
 }
 
 function addRoom() {
-  const name = prompt('聊天室名称：');
-  if (!name || !name.trim()) return;
-  apiPost('/api/rooms', { name: name.trim(), agents: [] }).then(result => {
-    if (result && result.ok) loadRooms();
-    else if (result) alert(result.error || '创建失败');
+  const overlay = document.createElement('div');
+  overlay.className = 'test-modal-overlay';
+  overlay.innerHTML = `<div class="test-modal" style="text-align:left;padding:24px 28px">
+    <div style="font-size:1em;font-weight:600;color:var(--text);margin-bottom:16px">新增聊天室</div>
+    <div class="wakeup-field">
+      <label>聊天室名称</label>
+      <input type="text" class="room-name-input" placeholder="输入名称…" style="font-size:0.9em;padding:8px 10px" autofocus />
+    </div>
+    <div class="test-modal-actions" style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px;margin-bottom:0">
+      <button class="test-modal-close" id="addRoomCancel">取消</button>
+      <button class="save-btn" id="addRoomConfirm" style="padding:6px 20px;font-size:0.82em">创建</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+
+  const input = overlay.querySelector('.room-name-input');
+  const confirmBtn = overlay.querySelector('#addRoomConfirm');
+  const cancelBtn = overlay.querySelector('#addRoomCancel');
+
+  const close = () => overlay.remove();
+
+  input.focus();
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') confirmBtn.click();
+    if (e.key === 'Escape') close();
   });
+  confirmBtn.addEventListener('click', async () => {
+    const name = input.value.trim();
+    if (!name) {
+      input.classList.add('field-error');
+      input.focus();
+      return;
+    }
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = '创建中…';
+    const result = await apiPost('/api/rooms', { name, agents: [] });
+    if (result && result.ok) {
+      close();
+      loadRooms();
+    } else {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = '创建';
+      toast(result?.error || '创建失败', 'error');
+    }
+  });
+  cancelBtn.addEventListener('click', close);
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
 }
 
 async function deleteRoom(roomId) {
