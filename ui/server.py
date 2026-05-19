@@ -27,7 +27,7 @@ from pathlib import Path
 # 从 core/ 导入
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
 from lock import file_lock
-from poll import do_archive, run_poll, load_config as load_poll_config
+from poll import do_archive, run_poll, load_config as load_poll_config, wakeup_agent
 
 
 BRIDGE_FILENAME = "bridge.yaml"
@@ -501,6 +501,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "/api/poll/stop": self.handle_poll_stop,
             "/api/poll/history": self.handle_poll_history,
             "/api/send": self.handle_send_message,
+            "/api/agent/test": self.handle_test_agent,
             "/api/rooms": self.handle_save_room,
             "/api/rooms/delete": self.handle_delete_room,
         }
@@ -946,6 +947,24 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 f.write(json.dumps(msg, ensure_ascii=False) + "\n")
 
         self.send_json({"ok": True, "agent_id": agent_id, "chars": len(text)})
+
+    def handle_test_agent(self):
+        body, err = self._read_json_body()
+        if err:
+            self.send_json(err)
+            return
+
+        wakeup = body.get("wakeup", {})
+        url = wakeup.get("url", "").strip()
+        if not url:
+            self.send_json({"ok": False, "error": "Webhook URL 未配置"})
+            return
+
+        success, detail = wakeup_agent(wakeup, "[Agent Bridge] 连通测试", "agent-bridge")
+        if success:
+            self.send_json({"ok": True, "status": detail})
+        else:
+            self.send_json({"ok": False, "error": detail})
 
     def handle_bridge_yaml(self):
         shared = Path(self.shared_dir)
