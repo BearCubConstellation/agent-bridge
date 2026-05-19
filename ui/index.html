@@ -64,10 +64,10 @@ body {
 .header {
   background: var(--surface); border-bottom: 1px solid var(--border);
   padding: 10px 20px;
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
   position: sticky; top: 0; z-index: 100;
 }
-.header-left { display: flex; align-items: center; gap: 12px; }
+.header-left { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .logo {
   font-family: var(--font); font-size: 1em; font-weight: 700;
   background: linear-gradient(135deg, var(--red), #e94560);
@@ -76,7 +76,7 @@ body {
 }
 .header-sub { color: var(--text3); font-size: 0.78em; font-family: var(--font); }
 .header-right { display: flex; align-items: center; gap: 8px; }
-.badge-list { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.badge-list { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .theme-toggle {
   width: 30px; height: 30px; flex: 0 0 30px;
   display: inline-flex; align-items: center; justify-content: center;
@@ -140,19 +140,16 @@ body {
 
 /* ═══ Agent cards ═══ */
 .cards-bar {
-  background: var(--surface);
-  padding: 10px 20px;
-  display: flex; gap: 10px;
-  border-bottom: 1px solid var(--border);
-  overflow-x: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
 }
 .agent-card {
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 10px 14px;
-  min-width: 180px;
-  flex-shrink: 0;
+  min-width: 0;
 }
 .agent-card-header {
   display: flex; align-items: center; gap: 8px;
@@ -175,10 +172,10 @@ body {
 
 /* ═══ Tabs ═══ */
 .tab-bar {
-  background: var(--surface);
   display: flex;
-  border-bottom: 1px solid var(--border);
-  padding: 0 20px;
+  align-self: stretch;
+  justify-content: center;
+  flex: 1;
 }
 .tab-btn {
   background: none; border: none;
@@ -189,6 +186,15 @@ body {
 }
 .tab-btn:hover { color: var(--text2); }
 .tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
+
+.agent-area {
+  max-width: 860px;
+  margin: 0 auto;
+}
+.agent-page-badges {
+  justify-content: flex-start;
+  margin-bottom: 12px;
+}
 
 .config-banner {
   display: none; background: rgba(255,217,61,0.08); border-bottom: 1px solid rgba(255,217,61,0.18);
@@ -211,7 +217,9 @@ body {
 .compose-bar {
   padding: 8px 20px;
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
   display: flex; align-items: center; gap: 8px;
 }
 .compose-bar select {
@@ -515,16 +523,17 @@ body {
 
 @media (max-width: 600px) {
   .form-grid { grid-template-columns: 1fr; }
-  .header { padding: 8px 12px; }
-  .cards-bar { padding: 8px 12px; }
-  .tab-bar { padding: 0 12px; }
+  .header { padding: 8px 12px; gap: 10px; flex-wrap: wrap; }
+  .header-left { width: 100%; }
+  .header-right { position: absolute; top: 8px; right: 12px; }
+  .tab-bar { order: 2; flex-basis: 100%; justify-content: flex-start; overflow-x: auto; }
   .tab-btn { padding: 8px 12px; font-size: 0.78em; }
   .compose-bar { padding: 6px 12px; flex-wrap: wrap; }
   .compose-bar input { max-width: 100%; }
   .main-content { padding: 0; }
   .tab-pane { padding: 12px; }
   .msg-bubble { max-width: 85%; }
-  .agent-card { min-width: 140px; }
+  .cards-bar { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -535,33 +544,29 @@ body {
     <span class="logo">agent-bridge</span>
     <span class="header-sub">控制中心</span>
   </div>
+  <div class="tab-bar" aria-label="主导航">
+    <button class="tab-btn active" data-tab="chat">💬 聊天</button>
+    <button class="tab-btn" data-tab="activity">📡 活动</button>
+    <button class="tab-btn" data-tab="agent">◎ Agent</button>
+    <button class="tab-btn" data-tab="settings">⚙ 设置</button>
+  </div>
   <div class="header-right">
     <button class="theme-toggle" id="themeToggle" type="button" title="切换明暗色模式" aria-label="切换明暗色模式">☀</button>
-    <div class="badge-list" id="agentBadgeContainer"></div>
   </div>
 </header>
 
-<div class="cards-bar" id="cardsBar"></div>
-
-<div class="tab-bar">
-  <button class="tab-btn active" data-tab="chat">💬 聊天</button>
-  <button class="tab-btn" data-tab="activity">📡 活动</button>
-  <button class="tab-btn" data-tab="settings">⚙ 设置</button>
-</div>
-
 <div class="config-banner" id="configBanner"></div>
-
-<div class="compose-bar">
-  <select id="composeAgent"></select>
-  <input type="text" id="composeInput" placeholder="输入消息，按 Enter 发送…" />
-  <button class="compose-btn" id="composeBtn">发送→</button>
-</div>
 
 <div class="main-content">
 
   <!-- ═══ Chat pane ═══ -->
   <div class="tab-pane active" id="pane-chat">
     <div class="chat-area">
+      <div class="compose-bar">
+        <select id="composeAgent"></select>
+        <input type="text" id="composeInput" placeholder="输入消息，按 Enter 发送…" />
+        <button class="compose-btn" id="composeBtn">发送→</button>
+      </div>
       <div class="chat-controls">
         <input class="chat-search" id="searchInput" type="text" placeholder="搜索消息…" />
         <select class="chat-archive" id="archiveSelect">
@@ -577,6 +582,14 @@ body {
           <p>等 agent 双方开始通信后，消息将在这里显示。</p>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ═══ Agent pane ═══ -->
+  <div class="tab-pane" id="pane-agent">
+    <div class="agent-area">
+      <div class="badge-list agent-page-badges" id="agentBadgeContainer"></div>
+      <div class="cards-bar" id="cardsBar"></div>
     </div>
   </div>
 
