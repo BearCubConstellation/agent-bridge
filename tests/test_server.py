@@ -390,6 +390,71 @@ class TestMessageAPI(TestServerBase):
         self.assertIsInstance(data.get("messages", []), list)
 
 
+class TestRoomAPI(TestServerBase):
+    """Room directory API endpoints."""
+
+    def _configure_three_agents(self):
+        agents = []
+        for aid in ("alice", "bob", "carol"):
+            agents.append({
+                "id": aid,
+                "display_name": aid.capitalize(),
+                "color": "#8888a0",
+                "cursor": "line",
+                "filter_from": "",
+                "wakeup": {"url": "", "method": "POST", "body_template": {"message": "{{message}}"}},
+            })
+        self._put("/api/config/full", {
+            "shared_dir": str(self.tmpdir),
+            "agent_id": "alice",
+            "agents": agents,
+        })
+
+    def test_room_accepts_three_agents_and_order(self):
+        self._configure_three_agents()
+
+        status, data = self._post("/api/rooms", {
+            "id": "room_three",
+            "name": "Three",
+            "agents": ["alice", "bob", "carol"],
+            "order": ["carol", "alice", "bob"],
+            "policy": "round_robin",
+            "max_turns": 12,
+        })
+
+        self.assertEqual(status, 200)
+        self.assertTrue(data["ok"])
+        status, rooms = self._get("/api/rooms")
+        self.assertEqual(status, 200)
+        room = next(r for r in rooms["rooms"] if r["id"] == "room_three")
+        self.assertEqual(room["agents"], ["alice", "bob", "carol"])
+        self.assertEqual(room["order"], ["carol", "alice", "bob"])
+        self.assertEqual(room["max_turns"], 12)
+        self.assertTrue((self.tmpdir / "rooms" / "room_three" / "active.jsonl").exists())
+
+    def test_room_send_and_messages_endpoint(self):
+        self._configure_three_agents()
+        self._post("/api/rooms", {
+            "id": "room_chat",
+            "name": "Chat",
+            "agents": ["alice", "bob"],
+            "order": ["alice", "bob"],
+        })
+
+        status, sent = self._post("/api/rooms/room_chat/send", {
+            "agent_id": "alice",
+            "text": "hello room",
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(sent["ok"])
+        status, data = self._get("/api/rooms/room_chat/messages")
+        self.assertEqual(status, 200)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["count"], 1)
+        self.assertEqual(data["messages"][0]["room"], "room_chat")
+        self.assertEqual(data["messages"][0]["msg"], "hello room")
+
+
 class TestOpenCurrentFolderAPI(TestServerBase):
     """打开当前对话目录 API 绔偣銆?"""
 

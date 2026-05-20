@@ -28,6 +28,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
 from lock import file_lock
 from poll import do_archive, run_poll, load_config as load_poll_config, wakeup_agent
+from adapters import adapter_capability, adapter_to_wakeup, normalize_adapter, wakeup_to_adapter
+from rooms import (
+    append_room_message,
+    ensure_room,
+    normalize_room,
+    read_room_messages,
+    read_room_state,
+    set_room_status,
+    tick_room,
+    tick_running_rooms,
+    validate_room_id,
+    write_room_state,
+)
 
 
 BRIDGE_FILENAME = "bridge.yaml"
@@ -109,20 +122,17 @@ from poll import parse_jsonl  # noqa: E402
 
 
 def _classify_conn_error(detail, url):
-    """将底层连接错误翻译为用户友好的中文提示。"""
+    """Convert low-level connection errors into short UI messages."""
     d = detail.lower()
     if "10061" in d or "connection refused" in d or "errno 111" in d:
-        return "连接被拒绝：目标服务未启动，或端口号填写错误"
+        return "Connection refused: target service is not running or the port is wrong"
     if "timed out" in d or "10060" in d or "errno 110" in d:
-        return "连接超时：请检查目标地址是否正确、网络是否通畅"
+        return "Connection timed out: check the target address and network"
     if "name or service not known" in d or "11001" in d or "getaddrinfo" in d:
-        return "无法解析主机名：请检查 URL 中的地址是否正确"
+        return "Host name could not be resolved"
     if detail.startswith("HTTP "):
         code = detail.split("HTTP ", 1)[1].split(":")[0].strip()
-        reasons = {"401": "认证失败（401），请检查认证配置", "403": "无权限访问（403）",
-                   "404": "路径不存在（404），请检查 URL 路径是否正确",
-                   "500": "服务端内部错误（500）", "502": "网关错误（502），上游服务不可用"}
-        return reasons.get(code, f"服务已连通但返回错误（HTTP {code}）")
+        return f"HTTP error {code}"
     return detail
 
 
@@ -229,6 +239,11 @@ def _discovered_agent(agent_id, display_name, kind, source, details="", wakeup=N
     }
     if wakeup:
         item["wakeup"] = wakeup
+        item["adapter"] = wakeup_to_adapter(wakeup)
+    else:
+        item["adapter"] = {"type": "manual", "config": {}, "auth": {}, "template": {}}
+    item["capability"] = adapter_capability(item)
+    item["health"] = item["capability"]["health"]
     return item
 
 
@@ -382,7 +397,23 @@ def read_bridge(shared_dir):
         a.setdefault("color", "#ff6b6b" if list(cfg["agents"].keys())[0] == key else "#4ecdc4")
         a.setdefault("id", key)
         a.setdefault("cursor", "line")
-        a.setdefault("wakeup", {"url": "", "method": "POST", "body_template": {"message": "{{message}}"}})
+        had_wakeup = "wakeup" in a
+        if "adapter" not in a:
+            a["adapter"] = wakeup_to_adapter(a.get("wakeup", {}))
+        if not had_wakeup and a.get("adapter", {}).get("type") == "native_http":
+            a["wakeup"] = adapter_to_wakeup(a["adapter"])
+        else:
+            a.setdefault("wakeup", {"url": "", "method": "POST", "body_template": {"message": "{{message}}"}})
+            a["wakeup"]["body_template"] = a["wakeup"].get("body_template", {"message": "{{message}}"})
+    normalized_rooms = {}
+    for key, r in cfg.get("rooms", {}).items():
+        room = normalize_room({**r, "id": r.get("id", key)})
+        normalized_rooms[room["id"]] = room
+        try:
+            ensure_room(shared_dir, room)
+        except Exception:
+            pass
+    cfg["rooms"] = normalized_rooms
     return cfg, config_path
 
 
@@ -410,7 +441,7 @@ def rename_cursor(shared_dir, old_id, new_id):
 # ─── 后台轮询 ─────────────────────────────────────────
 
 class PollManager:
-    """管理后台轮询线程。"""
+    """Manage the background polling thread."""
 
     def __init__(self, shared_dir, interval=DEFAULT_POLL_INTERVAL):
         self.shared_dir = shared_dir
@@ -442,7 +473,7 @@ class PollManager:
             self._thread.join(timeout=5)
 
     def poll_now(self):
-        """立即触发一次轮询（同步执行）。"""
+        """Run one polling cycle synchronously."""
         return self._do_poll()
 
     def is_running(self):
@@ -454,7 +485,7 @@ class PollManager:
             self._stop.wait(self.interval)
 
     def _do_poll(self):
-        """执行一次轮询，更新 last_result 和 last_run。"""
+        """Run one poll cycle and update last_result/last_run."""
         config_path = Path(self.shared_dir) / BRIDGE_FILENAME
         if not config_path.exists():
             return self.last_result
@@ -462,6 +493,9 @@ class PollManager:
         try:
             config = load_poll_config(str(config_path))
             result = run_poll(config)
+            room_results = tick_running_rooms(config)
+            if room_results:
+                result["rooms"] = room_results
         except Exception as e:
             result = {"ok": False, "new_msgs": 0, "delivered": False,
                       "archived": None, "error": str(e), "to_agent": "", "from_agent": ""}
@@ -511,6 +545,8 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         }
         if path in routes:
             routes[path]()
+        elif path.startswith("/api/rooms/") and path.endswith("/messages"):
+            self.handle_room_messages(path)
         elif path.startswith("/api/history/"):
             self.handle_history(path)
         else:
@@ -536,6 +572,8 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         handler = routes.get(parsed.path)
         if handler:
             handler()
+        elif parsed.path.startswith("/api/rooms/"):
+            self.handle_room_action(parsed.path)
         else:
             self.send_error(404)
 
@@ -585,14 +623,23 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 "filter_from": a.get("filter_from", ""),
                 "sample": bool(a.get("sample")),
                 "wakeup": a.get("wakeup", {}),
+                "adapter": normalize_adapter(a),
+                "capability": adapter_capability(a),
             })
         rooms_list = []
         for key, r in cfg.get("rooms", {}).items():
+            room = normalize_room({**r, "id": r.get("id", key)})
+            state = read_room_state(shared, room["id"], room)
             rooms_list.append({
-                "id": r.get("id", key),
-                "name": r.get("name", ""),
-                "agents": r.get("agents", []),
-                "created_at": r.get("created_at", ""),
+                "id": room["id"],
+                "name": room.get("name", ""),
+                "agents": room.get("agents", []),
+                "order": room.get("order", []),
+                "policy": room.get("policy", "round_robin"),
+                "status": state.get("status", room.get("status", "paused")),
+                "state": state,
+                "max_turns": room.get("max_turns", 50),
+                "created_at": room.get("created_at", ""),
             })
         self.send_json({
             "ok": True,
@@ -732,6 +779,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                             "token_jsonpath": auth.get("token_jsonpath", ""),
                         }
                     entry["wakeup"] = wakeup
+                    entry["adapter"] = a.get("adapter") or wakeup_to_adapter(wakeup)
                     agents_dict[aid] = entry
 
                 cfg["agents"] = agents_dict
@@ -746,7 +794,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         saved_agents_out = saved_agents if "agents" in body else []
         self.send_json({"ok": True,
                         "saved_agents": saved_agents_out,
-                        "message": "配置已保存"})
+                        "message": "config saved"})
 
     # ─── GET /api/rooms ────────────────────────────
 
@@ -755,15 +803,22 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         cfg, _ = read_bridge(shared)
         rooms_list = []
         for key, r in cfg.get("rooms", {}).items():
+            room = normalize_room({**r, "id": r.get("id", key)})
+            state = read_room_state(shared, room["id"], room)
             rooms_list.append({
-                "id": r.get("id", key),
-                "name": r.get("name", ""),
-                "agents": r.get("agents", []),
-                "created_at": r.get("created_at", ""),
+                "id": room["id"],
+                "name": room.get("name", ""),
+                "agents": room.get("agents", []),
+                "order": room.get("order", []),
+                "policy": room.get("policy", "round_robin"),
+                "status": state.get("status", room.get("status", "paused")),
+                "state": state,
+                "max_turns": room.get("max_turns", 50),
+                "created_at": room.get("created_at", ""),
             })
         agents_brief = [
             {"id": a["id"], "display_name": a.get("display_name", a["id"]),
-             "color": a.get("color", "#8888a0")}
+             "color": a.get("color", "#8888a0"), "capability": adapter_capability(a)}
             for a in cfg.get("agents", {}).values()
         ]
         self.send_json({"ok": True, "rooms": rooms_list, "agents": agents_brief})
@@ -782,9 +837,16 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         room_id = (body.get("id") or "").strip() or generate_room_id()
         room_name = (body.get("name") or "").strip()
         room_agents = body.get("agents") or []
+        room_order = body.get("order") or room_agents
+        room_policy = body.get("policy") or "round_robin"
+        room_status = body.get("status") or "paused"
+        try:
+            max_turns = int(body.get("max_turns", 50))
+        except (TypeError, ValueError):
+            max_turns = 50
 
-        if len(room_agents) > 2:
-            self.send_json({"ok": False, "error": "room can have at most 2 agents"})
+        if not validate_room_id(room_id):
+            self.send_json({"ok": False, "error": "invalid room id"})
             return
 
         for aid in room_agents:
@@ -792,26 +854,42 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({"ok": False, "error": f"unknown agent: '{aid}'"})
                 return
 
-        # Check no agent is already in another room
-        existing_rooms = cfg.get("rooms", {})
-        for rkey, r in existing_rooms.items():
-            if rkey == room_id:
-                continue
-            for aid in room_agents:
-                if aid in r.get("agents", []):
-                    self.send_json({"ok": False, "error": f"agent '{aid}' is already in room '{r.get('name', rkey)}'"})
-                    return
+        if len(set(room_agents)) != len(room_agents):
+            self.send_json({"ok": False, "error": "duplicate agent in room"})
+            return
+        if len(set(room_order)) != len(room_order):
+            self.send_json({"ok": False, "error": "duplicate agent in order"})
+            return
+        for aid in room_order:
+            if aid not in room_agents:
+                self.send_json({"ok": False, "error": f"order contains non-member agent: '{aid}'"})
+                return
+        if room_policy not in ("round_robin", "broadcast"):
+            self.send_json({"ok": False, "error": "unsupported room policy"})
+            return
 
+        existing_rooms = cfg.get("rooms", {})
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         existing = existing_rooms.get(room_id, {})
-        cfg.setdefault("rooms", {})[room_id] = {
+        room = normalize_room({
             "id": room_id,
             "name": room_name or existing.get("name", room_id),
             "agents": room_agents,
+            "order": room_order,
+            "policy": room_policy,
+            "status": room_status,
+            "max_turns": max_turns,
             "created_at": existing.get("created_at", now),
-        }
+        })
+        cfg.setdefault("rooms", {})[room_id] = room
 
         sync_filter_from(cfg)
+        ensure_room(shared, room)
+        state = read_room_state(shared, room_id, room)
+        state["order"] = room["order"]
+        state["max_turns"] = room["max_turns"]
+        state["status"] = room_status
+        write_room_state(shared, room_id, state)
         write_bridge(config_path, cfg)
         self.send_json({"ok": True, "room_id": room_id})
 
@@ -841,6 +919,86 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json({"ok": True, "deleted": room_id})
 
     # ─── POST /api/archive ─────────────────────────
+
+    def _parse_room_api_path(self, path):
+        parts = [p for p in path.split("/") if p]
+        if len(parts) != 4 or parts[0] != "api" or parts[1] != "rooms":
+            return None, None
+        room_id = parts[2]
+        action = parts[3]
+        if not validate_room_id(room_id):
+            return None, None
+        return room_id, action
+
+    def handle_room_messages(self, path):
+        room_id, action = self._parse_room_api_path(path)
+        if action != "messages":
+            self.send_error(404)
+            return
+        shared = Path(self.shared_dir)
+        cfg, _ = read_bridge(shared)
+        if room_id not in cfg.get("rooms", {}):
+            self.send_json({"ok": False, "error": "room not found"})
+            return
+        messages = read_room_messages(shared, room_id, include_history=False, limit=500)
+        self.send_json({"ok": True, "room_id": room_id, "count": len(messages), "messages": messages})
+
+    def handle_room_action(self, path):
+        room_id, action = self._parse_room_api_path(path)
+        if not room_id:
+            self.send_error(404)
+            return
+
+        body, err = self._read_json_body()
+        if err:
+            self.send_json(err)
+            return
+
+        shared = Path(self.shared_dir)
+        cfg, config_path = read_bridge(shared)
+        if room_id not in cfg.get("rooms", {}):
+            self.send_json({"ok": False, "error": "room not found"})
+            return
+
+        room = normalize_room({**cfg["rooms"][room_id], "id": room_id})
+        if action == "send":
+            agent_id = (body.get("agent_id") or body.get("from") or "user").strip()
+            text = body.get("text", "")
+            to_agent = (body.get("to") or "").strip()
+            kind = body.get("kind") or ("user" if agent_id == "user" else "agent")
+            if not validate_agent_id(agent_id):
+                self.send_json({"ok": False, "error": "invalid agent_id"})
+                return
+            if agent_id != "user" and agent_id not in cfg.get("agents", {}):
+                self.send_json({"ok": False, "error": f"unknown agent_id: '{agent_id}'"})
+                return
+            if not text:
+                self.send_json({"ok": False, "error": "text required"})
+                return
+            msg = append_room_message(shared, room_id, agent_id, text, to_agent=to_agent, kind=kind)
+            self.send_json({"ok": True, "room_id": room_id, "message": msg})
+            return
+
+        if action == "start":
+            state = set_room_status(shared, room, "running")
+            cfg["rooms"][room_id]["status"] = "running"
+            write_bridge(config_path, cfg)
+            self.send_json({"ok": True, "room_id": room_id, "state": state})
+            return
+
+        if action == "pause":
+            state = set_room_status(shared, room, "paused")
+            cfg["rooms"][room_id]["status"] = "paused"
+            write_bridge(config_path, cfg)
+            self.send_json({"ok": True, "room_id": room_id, "state": state})
+            return
+
+        if action == "tick":
+            result = tick_room(cfg, room_id, force=bool(body.get("force", True)))
+            self.send_json({"ok": bool(result.get("ok")), "result": result})
+            return
+
+        self.send_error(404)
 
     def handle_archive(self):
         shared = Path(self.shared_dir)
@@ -983,12 +1141,15 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         wakeup = body.get("wakeup", {})
+        adapter = body.get("adapter")
+        if adapter:
+            wakeup = adapter_to_wakeup(adapter)
         url = wakeup.get("url", "").strip()
         if not url:
-            self.send_json({"ok": False, "error": "Webhook URL 未配置"})
+            self.send_json({"ok": False, "error": "Webhook URL not configured"})
             return
 
-        success, detail = wakeup_agent(wakeup, "[Agent Bridge] 连通测试", "agent-bridge")
+        success, detail = wakeup_agent(wakeup, "[Agent Bridge] connectivity test", "agent-bridge")
         if success:
             self.send_json({"ok": True, "status": detail})
         else:
@@ -1039,8 +1200,10 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             cfg, _ = read_bridge(shared)
             room = cfg.get("rooms", {}).get(room_id)
             if room:
-                room_agents = set(room.get("agents", []))
-                all_msgs = [m for m in all_msgs if m.get("from") in room_agents]
+                room_msgs = read_room_messages(shared, room_id, include_history=bool(archive), limit=limit)
+                legacy_agents = set(room.get("agents", []))
+                legacy_msgs = [m for m in all_msgs if m.get("from") in legacy_agents]
+                all_msgs = room_msgs + legacy_msgs
 
         if search:
             q = search.lower()

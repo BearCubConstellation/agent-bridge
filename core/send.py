@@ -20,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 from lock import file_lock
+from rooms import append_room_message, validate_room_id
 
 DEFAULT_BRIDGE_CANDIDATES = [
     Path.home() / ".agent-bridge" / "bridge.yaml",
@@ -105,6 +106,9 @@ def main():
                         help="Path to bridge.yaml (default: auto-search)")
     parser.add_argument("--agent", "-a", help="Override agent ID")
     parser.add_argument("--dir", "-d", help="Override shared directory")
+    parser.add_argument("--room", help="Write to rooms/<room>/active.jsonl instead of legacy active.jsonl")
+    parser.add_argument("--to", help="Optional target agent ID for room messages")
+    parser.add_argument("--kind", default="agent", help="Optional room message kind")
 
     args = parser.parse_args()
     cfg = load_bridge_config(args.bridge_config)
@@ -136,8 +140,6 @@ def main():
 
     # shared_dir 优先级: CLI > bridge.yaml > 自动 fallback
     shared_dir = args.dir or cfg.get("shared_dir", "")
-    active_file = find_active_jsonl(shared_dir)
-
     text = args.message
     if not text:
         text = sys.stdin.read().strip()
@@ -145,6 +147,16 @@ def main():
         print("Usage: send.py <message>  (or pipe via stdin)", file=sys.stderr)
         sys.exit(1)
 
+    if args.room:
+        if not validate_room_id(args.room):
+            print("Error: invalid room ID", file=sys.stderr)
+            sys.exit(1)
+        root = Path(os.path.expandvars(os.path.expanduser(shared_dir or str(Path.home() / ".agent-bridge"))))
+        append_room_message(root, args.room, agent_id, text, to_agent=args.to or "", kind=args.kind)
+        print(f"[{agent_id}] Room message sent to {args.room} ({len(text)} chars)")
+        return
+
+    active_file = find_active_jsonl(shared_dir)
     send(agent_id, active_file, text)
 
 
