@@ -50,8 +50,11 @@ check_python() {
 download() {
     info "Downloading source..."
     rm -rf "$SRC_DIR"
+    mkdir -p "$INSTALL_DIR"
     TARBALL_URL="https://github.com/$REPO/archive/refs/heads/$BRANCH.tar.gz"
-    if ! curl -fsSL "$TARBALL_URL" | tar xz -C "$INSTALL_DIR" 2>/dev/null; then
+    TMP_TGZ=$(mktemp /tmp/agent-bridge.XXXXXX.tar.gz)
+    trap "rm -f '$TMP_TGZ'" EXIT
+    if ! curl -fsSL "$TARBALL_URL" -o "$TMP_TGZ"; then
         err "Cannot continue — unable to download source code from GitHub"
         echo ""
         echo "    URL: $TARBALL_URL"
@@ -67,6 +70,12 @@ download() {
         echo "    - Disable VPN / firewall temporarily"
         exit 1
     fi
+    if ! tar xzf "$TMP_TGZ" -C "$INSTALL_DIR"; then
+        err "Cannot continue — unable to extract source archive"
+        exit 1
+    fi
+    rm -f "$TMP_TGZ"
+    trap - EXIT
     mv "$INSTALL_DIR/agent-bridge-$BRANCH" "$SRC_DIR"
     ok "Source ready: $SRC_DIR"
 }
