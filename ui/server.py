@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -169,7 +170,7 @@ def sample_agents():
 
 
 def generate_room_id():
-    return "room_" + hashlib.md5(f"{time.time()}{os.getpid()}".encode()).hexdigest()[:8]
+    return "room_" + uuid.uuid4().hex[:8]
 
 
 def sync_filter_from(cfg):
@@ -1166,7 +1167,10 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         archive = params.get("archive", [None])[0]
         search = params.get("q", [None])[0]
         room_id = params.get("room", [None])[0]
-        limit = int(params.get("limit", [500])[0])
+        try:
+            limit = int(params.get("limit", [500])[0])
+        except (ValueError, TypeError):
+            limit = 500
         shared = Path(self.shared_dir)
         all_msgs = []
 
@@ -1289,7 +1293,8 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         msg = fmt % args
-        if "GET /api/messages" in msg or "GET /api/poll" in msg:
+        _suppress_patterns = ["/api/messages", "/api/poll", "/api/status"]
+        if any(p in msg for p in _suppress_patterns):
             return
         print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
@@ -1324,7 +1329,13 @@ def main():
     if not args.no_poll:
         poll_mgr.start()
 
-    server = http.server.HTTPServer((args.host, args.port), BridgeHandler)
+    try:
+        server = http.server.HTTPServer((args.host, args.port), BridgeHandler)
+    except OSError as e:
+        print(f"Error: Cannot bind to {args.host}:{args.port} — {e}")
+        print(f"Hint: Port may be in use. Try --port with a different number (e.g. --port {args.port + 1}).")
+        sys.exit(1)
+
     url = f"http://{args.host}:{args.port}"
 
     poll_text = f"every {args.poll_interval}s" if not args.no_poll else "disabled"

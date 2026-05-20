@@ -84,8 +84,9 @@ def ensure_room(shared_dir, room_cfg):
     state_path = rdir / "state.json"
     if not state_path.exists():
         write_room_state(shared_dir, rid, default_state(room))
-    room_yaml = rdir / "room.yaml"
-    if not room_yaml.exists():
+    room_yaml = rdir / "room.json"
+    # 向后兼容：如果旧名 room.yaml 已存在则不重新创建
+    if not room_yaml.exists() and not (rdir / "room.yaml").exists():
         room_yaml.write_text(json.dumps(room, ensure_ascii=False, indent=2), encoding="utf-8")
     return rdir
 
@@ -383,6 +384,7 @@ def tick_room(config, room_id, force=False):
     latest_line = max(_line_no(m) for m in pending)
     write_room_cursor(shared_dir, room_id, agent_id, latest_line)
     state["waiting_for"] = agent_id
+    # waiting_line 存的是当前消息总数，用于判断后续新消息（行号 > 此值）
     state["waiting_line"] = len(messages)
     state["turn_count"] = int(state.get("turn_count", 0)) + 1
     state["last_error"] = ""
