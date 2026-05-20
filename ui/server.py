@@ -477,7 +477,7 @@ class PollManager:
         return self._do_poll()
 
     def is_running(self):
-        return self.running and (self._thread is None or self._thread.is_alive())
+        return self.running and self._thread is not None and self._thread.is_alive()
 
     def _loop(self):
         while not self._stop.is_set():
@@ -1090,14 +1090,8 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         if not self.poll_manager:
             self.send_json({"ok": False, "error": "poll manager not initialized"})
             return
-        length = int(self.headers.get("Content-Length", 0))
-        limit = 50
-        if length > 0:
-            try:
-                body = json.loads(self.rfile.read(length))
-                limit = body.get("limit", 50)
-            except Exception:
-                pass
+        body, _ = self._read_json_body()
+        limit = (body or {}).get("limit", 50)
         history = self.poll_manager.get_history(limit)
         self.send_json({"ok": True, "history": history})
 

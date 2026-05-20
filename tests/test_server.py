@@ -485,7 +485,7 @@ class TestOpenCurrentFolderAPI(TestServerBase):
         })
         self.assertEqual(status, 200)
         self.assertTrue(data["ok"])
-        self.assertEqual(Path(mock_open.call_args.args[0]), archive)
+        self.assertEqual(Path(mock_open.call_args.args[0]), archive.resolve())
         self.assertTrue(mock_open.call_args.kwargs["select"])
 
     @patch("server.open_in_file_manager", return_value=(True, None))
