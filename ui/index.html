@@ -1448,6 +1448,35 @@ async function loadDiscoveredAgents() {
   renderDiscoveredAgents();
 }
 
+async function scanAndShowDiscover() {
+  const el = $('#settingsDiscoverResult');
+  if (!el) return;
+  el.innerHTML = '<div class="discover-empty">扫描中…</div>';
+  const data = await apiGet('/api/agents/discover');
+  if (!data || !data.ok) {
+    el.innerHTML = '<div class="discover-empty">扫描失败</div>';
+    return;
+  }
+  const agents = data.agents || [];
+  state.discoveredAgents = agents;
+  if (!agents.length) {
+    el.innerHTML = '<div class="discover-empty">未发现本机 Agent</div>';
+    return;
+  }
+  el.innerHTML = agents.map(a => {
+    const status = a.configured ? '已配置' : (a.sample ? '示例' : '未配置');
+    const statusClass = a.configured ? 'configured' : (a.sample ? 'sample' : '');
+    return `<div class="discover-card">
+      <div class="discover-card-header">
+        <span class="discover-name">📡 ${esc(a.display_name || a.id)}</span>
+        <span class="discover-pill${statusClass}">${status}</span>
+      </div>
+      <div class="discover-meta">${esc(a.kind || 'Agent')} · ${esc(a.id)}</div>
+      <div class="discover-meta">${esc(a.details || '')}</div>
+      <div class="discover-meta">${esc(a.source || '')}</div>`;
+  }).join('');
+}
+
 function renderDiscoveredAgents() {
   const el = discoverEl();
   if (!el) return;
@@ -2436,6 +2465,34 @@ function renderGlobalSettings(data, area) {
         <span style="font-size:0.72em;color:var(--text3);margin-left:4px">运行 poll 时使用哪个 Agent 的身份</span>
       </div>
     </div>
+    <div class="settings-section" style="margin-top:24px">
+      <div class="settings-section-title">扫描本机 Agent</div>
+      <p style="font-size:0.78em;color:var(--text3);margin:0 0 12px 0;line-height:1.6">
+        点击按钮主动扫描本机已安装的 AI Agent 程序。扫描完成后会列出发现的 Agent，
+        你可以参考这些信息手动配置到 Agent 页面中。
+      </p>
+      <button class="scan-btn" onclick="scanAndShowDiscover()" style="margin-bottom:16px">
+        开始扫描
+      </button>
+      <div class="discover-grid" id="settingsDiscoverResult"></div>
+      <details style="margin-top:16px;font-size:0.76em;color:var(--text3)">
+        <summary style="cursor:pointer;color:var(--text2);font-size:0.8em;margin-bottom:8px">
+          扫描原理说明
+        </summary>
+        <div style="line-height:1.7;padding:8px 0">
+          <p style="margin:0 0 8px 0"><b>扫描范围：</b>仅检查当前用户主目录下的已知配置路径，不会遍历整个文件系统。</p>
+          <p style="margin:0 0 8px 0"><b>扫描方式：</b></p>
+          <ul style="margin:0 0 8px 0;padding-left:20px">
+            <li><b>消息记录</b> — 读取 active.jsonl 中出现过的发送者</li>
+            <li><b>bridge.yaml</b> — 当前已配置的 Agent</li>
+            <li><b>Hermes Agent</b> — 检测 ~/.hermes/config.yaml，自动提取 webhook 地址和认证信息</li>
+            <li><b>OpenClaw</b> — 检测 ~/.openclaw/openclaw.json，自动提取认证 token</li>
+            <li><b>其他 Agent</b> — 检测 ~/.claude、~/.codex、~/.gemini、~/.qwen 等目录是否存在</li>
+          </ul>
+          <p style="margin:0 0 8px 0"><b>安全说明：</b>所有扫描仅在本地进行，不会发送网络请求或上传任何数据。发现的 Agent 信息仅在你的浏览器中展示。</p>
+        </div>
+      </details>
+    </div>
   </div>`;
   const openBtn = $('#openSharedDirBtn');
   if (openBtn) {
@@ -2457,7 +2514,6 @@ async function loadAgentConfig() {
   }
   renderAgentConfig(data, area);
   renderBadges();
-  loadDiscoveredAgents();
 }
 
 function renderAgentConfig(data, area) {
@@ -2520,14 +2576,6 @@ function renderAgentConfig(data, area) {
       <button class="add-agent-btn" onclick="addAgent()">＋ 添加 Agent</button>
       <button class="save-btn" onclick="saveFullConfig()">💾 保存配置</button>
       <span class="save-status" id="saveStatus"></span>
-    </div>
-    <div class="agent-section" style="margin-top:24px">
-      <div class="agent-section-header">
-        <div class="agent-section-title">本机发现</div>
-        <button class="scan-btn" id="scanAgentsBtn" type="button" onclick="loadDiscoveredAgents()">重新扫描</button>
-      </div>
-      <div class="discover-grid" id="discoveredAgents"></div>
-    </div>
   </div>`;
 }
 
@@ -2630,7 +2678,6 @@ async function saveFullConfig() {
     status.textContent = '✓ 配置已保存';
     status.className = 'save-status ok';
     await loadConfig(); // Refresh badges and cards
-    await loadDiscoveredAgents();
     setTimeout(() => { status.textContent = ''; }, 3000);
   } else {
     status.textContent = '保存失败: ' + (r?.error || '服务器错误');
@@ -2718,14 +2765,13 @@ function checkProtocol() {
   return true;
 }
 if (checkProtocol()) {
-  (async function init() {
-    await loadConfig();
-    await loadDiscoveredAgents();
-    await loadRooms();
-    await refreshAll();
-    startAutoRefresh();
-    loadPollStatus();
-  })();
+ (async function init() {
+   await loadConfig();
+   await loadRooms();
+   await refreshAll();
+   startAutoRefresh();
+   loadPollStatus();
+ })();
 }
 </script>
 </body>
