@@ -597,6 +597,7 @@ body {
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   transition: all var(--transition);
+  min-width: 0; overflow: hidden;
 }
 .room-agent-slot.drag-over {
   border-color: var(--accent);
@@ -609,6 +610,7 @@ body {
 .room-agent-slot.occupied:hover { border-color: var(--border-hover); }
 .room-agent-slot .agent-chip {
   display: flex; align-items: center; gap: 5px; font-weight: 600;
+  min-width: 0; overflow-wrap: break-word; word-break: break-word;
 }
 .room-agent-slot .agent-chip .dot { width: 8px; height: 8px; border-radius: 50%; }
 .room-agent-slot .slot-hint { font-size: 0.72em; color: var(--text3); }
