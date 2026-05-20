@@ -1201,6 +1201,8 @@ let state = {
   editingBadge: null, popupCloseHandler: null,
   activeTab: 'chat',
   rooms: [], currentRoomId: null, chatView: 'grid',
+  roomGridFingerprint: '',
+  roomGridRendered: false,
   roomViewSeq: 0,
 };
 
@@ -1633,19 +1635,50 @@ function refreshCurrentRoomConversation() {
   }
 }
 
+function normalizeRoomForFingerprint(room) {
+  const order = room.order && room.order.length ? room.order : room.agents;
+  return {
+    id: room.id || '',
+    name: room.name || '',
+    status: room.status || '',
+    policy: room.policy || '',
+    max_turns: room.max_turns ?? null,
+    agents: Array.isArray(room.agents) ? room.agents.slice() : [],
+    order: Array.isArray(order) ? order.slice() : [],
+  };
+}
+
+function computeRoomsFingerprint(rooms) {
+  return JSON.stringify(
+    (rooms || [])
+      .map(normalizeRoomForFingerprint)
+      .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+  );
+}
+
 async function loadRooms() {
   const data = await apiGet('/api/rooms');
   if (!data || !data.ok) return;
-  state.rooms = data.rooms || [];
-  renderRoomGrid();
+  const nextRooms = data.rooms || [];
+  const nextFingerprint = computeRoomsFingerprint(nextRooms);
+  const shouldRender = nextFingerprint !== state.roomGridFingerprint;
+  state.rooms = nextRooms;
+  if (shouldRender) {
+    const rendered = renderRoomGrid({ animate: !state.roomGridRendered });
+    if (rendered) {
+      state.roomGridFingerprint = nextFingerprint;
+      state.roomGridRendered = true;
+    }
+  }
   if (state.chatView === 'conversation' && state.currentRoomId) {
     refreshCurrentRoomConversation();
   }
 }
 
-function renderRoomGrid() {
+function renderRoomGrid(options = {}) {
+  const animate = !!options.animate;
   const grid = $('#roomGrid');
-  if (!grid) return;
+  if (!grid) return false;
   const agents = state.agents || [];
 
   let html = '';
@@ -1683,17 +1716,20 @@ function renderRoomGrid() {
 
   grid.innerHTML = html;
   setupDragAndDrop();
-  // Staggered entrance for cards
-  const cards = grid.querySelectorAll('.room-card, .room-card-add');
-  cards.forEach((card, i) => {
-    card.style.opacity = '0';
-    card.style.transform = 'translateY(10px)';
-    card.style.transition = `opacity 0.25s ease ${i * 0.04}s, transform 0.3s var(--ease-out-expo) ${i * 0.04}s`;
-    requestAnimationFrame(() => {
-      card.style.opacity = '1';
-      card.style.transform = 'translateY(0)';
+  if (animate) {
+    // Only play the entrance animation on the initial render.
+    const cards = grid.querySelectorAll('.room-card, .room-card-add');
+    cards.forEach((card, i) => {
+      card.style.opacity = '0';
+      card.style.transform = 'translateY(10px)';
+      card.style.transition = `opacity 0.25s ease ${i * 0.04}s, transform 0.3s var(--ease-out-expo) ${i * 0.04}s`;
+      requestAnimationFrame(() => {
+        card.style.opacity = '1';
+        card.style.transform = 'translateY(0)';
+      });
     });
-  });
+  }
+  return true;
 }
 
 function renderAgentSlots(room) {
