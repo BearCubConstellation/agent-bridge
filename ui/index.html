@@ -564,46 +564,82 @@ body {
 .tool-btn:active { transform: scale(0.94); transition: transform 0.08s ease; }
 
 /* ═══ Room Grid ═══ */
-.room-grid-view { max-width: 960px; margin: 0 auto; }
-.room-grid-header { display: flex; align-items: center; margin-bottom: var(--space-lg); }
+.room-grid-view { max-width: 1120px; margin: 0 auto; }
+.room-grid-header {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: var(--space-md); margin-bottom: var(--space-lg);
+}
+.room-grid-header-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
 .room-grid-title { font-size: 0.95em; color: var(--text2); font-weight: 600; }
+.room-grid-subtitle { font-size: 0.75em; color: var(--text3); margin-top: 4px; }
+.room-grid-summary {
+  font-size: 0.76em; color: var(--text3);
+  padding: 6px 10px; border: 1px solid var(--border);
+  border-radius: var(--radius-pill); background: var(--surface);
+  white-space: nowrap;
+}
 .room-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
 }
 .room-card {
-  background: var(--surface);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px var(--space-lg);
+  border-left: 4px solid transparent;
+  border-radius: var(--radius-lg);
+  padding: var(--space-md) var(--space-lg);
   cursor: pointer; position: relative;
   transition: all var(--transition-slow), transform var(--transition-fast);
 }
-.room-card:hover { border-color: var(--border-hover); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.room-card:hover { border-color: var(--border-hover); transform: translateY(-1px); box-shadow: var(--shadow-md); }
 .room-card:active { transform: scale(0.98); }
-.room-card.active { border-color: var(--green); box-shadow: 0 0 0 2px rgba(78,205,196,0.2); }
-.room-card-name { font-weight: 600; font-size: 0.88em; margin-bottom: 10px; }
+.room-card.active { border-left-color: var(--green); box-shadow: 0 0 0 2px rgba(78,205,196,0.16); }
+.room-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-md); }
+.room-card-main { min-width: 0; flex: 1; }
+.room-card-name {
+  font-weight: 700; font-size: 0.95em; line-height: 1.25;
+  margin-bottom: 4px; word-break: break-word;
+}
+.room-card-desc {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  font-size: 0.72em; color: var(--text3);
+}
+.room-meta-pill {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border); background: var(--surface2);
+}
+.room-card-actions {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
 .room-card-agents {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-sm);
-  margin-bottom: var(--space-sm);
+  margin-top: var(--space-sm);
 }
 
 /* ═══ Room Agent Slot ═══ */
 .room-agent-slot {
-  flex: 1 1 120px;
+  flex: 0 1 180px;
   background: var(--surface2);
-  border: 2px dashed var(--border);
-  border-radius: var(--radius-sm);
-  padding: 10px var(--space-sm); text-align: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 7px 12px;
+  text-align: center;
   font-size: 0.78em; color: var(--text3);
-  min-height: 56px;
-  display: flex; flex-direction: column;
+  min-height: 0;
+  display: inline-flex; flex-direction: column;
   align-items: center; justify-content: center;
   transition: all var(--transition);
   min-width: 0; overflow: hidden;
+  box-shadow: inset 0 0 0 1px transparent;
 }
 .room-agent-slot.drag-over {
   border-color: var(--accent);
@@ -611,43 +647,62 @@ body {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 .room-agent-slot.occupied {
-  border-style: solid; border-color: var(--border);
+  border-color: var(--border);
+  background: rgba(26,26,48,0.92);
 }
 .room-agent-slot.occupied:hover { border-color: var(--border-hover); }
 .room-agent-slot .agent-chip {
   display: flex; align-items: center; gap: 5px; font-weight: 600;
   justify-content: center;
   max-width: 100%;
-  min-width: 0; overflow-wrap: break-word; word-break: break-word;
-  white-space: normal;
+  min-width: 0; overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .room-agent-slot .agent-chip .dot { width: 8px; height: 8px; border-radius: 50%; }
-.room-agent-slot .slot-hint { font-size: 0.72em; color: var(--text3); }
+.room-agent-slot .slot-hint { font-size: 0.72em; color: var(--text3); white-space: nowrap; }
+.room-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: var(--space-sm);
+}
+.room-card-hint {
+  font-size: 0.72em;
+  color: var(--text3);
+  line-height: 1.4;
+}
 
 /* ═══ Room Card Add ═══ */
 .room-card-add {
-  background: var(--surface);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--surface);
   border: 2px dashed var(--border);
-  border-radius: var(--radius);
-  aspect-ratio: 1 / 1;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
+  border-radius: var(--radius-lg);
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-lg);
   cursor: pointer; color: var(--text3);
   transition: all var(--transition), transform var(--transition-fast);
 }
 .room-card-add:hover { border-color: var(--accent); color: var(--accent); background: rgba(233,69,96,0.05); transform: translateY(-2px); box-shadow: var(--shadow-md); }
 .room-card-add:active { transform: scale(0.96); }
-.room-card-add .add-icon { font-size: 2.2em; margin-bottom: var(--space-sm); line-height: 1; transition: transform var(--transition); }
+.room-card-add .add-icon {
+  width: 44px; height: 44px; flex-shrink: 0;
+  display: grid; place-items: center;
+  border-radius: 50%; background: var(--surface2);
+  font-size: 1.7em; line-height: 1;
+  transition: transform var(--transition), background var(--transition);
+}
 .room-card-add:hover .add-icon { transform: scale(1.1); }
-.room-card-add .add-label { font-size: var(--font-base); font-weight: 500; }
+.room-card-add .add-label { font-size: var(--font-base); font-weight: 600; }
+.room-card-add .add-desc { font-size: 0.74em; color: var(--text3); margin-top: 4px; }
 
 /* ═══ Room Delete Button ═══ */
 .room-del-btn {
-  position: absolute; top: 8px; right: 8px;
   background: none; border: 1px solid transparent;
   color: var(--text3); cursor: pointer; font-size: 0.75em;
   padding: 2px 6px; border-radius: 4px; transition: all var(--transition);
-  opacity: 0; line-height: 1.3;
+  opacity: 0.75; line-height: 1.3;
 }
 .room-card:hover .room-del-btn { opacity: 1; }
 .room-del-btn:hover { color: var(--red); border-color: var(--border); background: rgba(255,107,107,0.08); }
@@ -1235,6 +1290,34 @@ const roomLogCount = $('#roomLogCount');
 const configBanner = $('#configBanner');
 const themeToggle = $('#themeToggle');
 
+function setupRoomGridHeader() {
+  const header = document.querySelector('.room-grid-header');
+  if (!header || header.dataset.enhanced === '1') return;
+
+  const title = header.querySelector('.room-grid-title');
+  if (title && title.parentElement && !header.querySelector('.room-grid-header-copy')) {
+    const wrap = document.createElement('div');
+    wrap.className = 'room-grid-header-copy';
+    title.parentElement.insertBefore(wrap, title);
+    wrap.appendChild(title);
+    const subtitle = document.createElement('div');
+    subtitle.className = 'room-grid-subtitle';
+    subtitle.textContent = '点击进入，拖拽 Agent 到卡片里即可调整房间成员';
+    wrap.appendChild(subtitle);
+  }
+
+  if (!header.querySelector('#roomGridSummary')) {
+    const summary = document.createElement('div');
+    summary.id = 'roomGridSummary';
+    summary.className = 'room-grid-summary';
+    summary.textContent = '0 个聊天室';
+    header.appendChild(summary);
+  }
+
+  header.dataset.enhanced = '1';
+}
+setupRoomGridHeader();
+
 // ═══ Theme ═══
 const THEME_KEY = 'agentBridgeTheme';
 
@@ -1689,6 +1772,12 @@ function renderRoomGrid(options = {}) {
   const grid = $('#roomGrid');
   if (!grid) return false;
   const agents = state.agents || [];
+  const rooms = state.rooms || [];
+  const summary = document.querySelector('#roomGridSummary');
+  const runningCount = rooms.filter(r => r.status === 'running').length;
+  if (summary) {
+    summary.textContent = `${rooms.length} 个聊天室 · ${runningCount} 个运行中`;
+  }
 
   let html = '';
 
