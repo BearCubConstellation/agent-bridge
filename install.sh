@@ -125,7 +125,7 @@ print_done() {
     echo "  Install complete!"
     echo ""
     echo "    Run:"
-    echo "      ${C}bridge start${N}"
+    echo -e "      ${C}bridge start${N}"
     echo ""
     echo "    The WebUI will open automatically. Complete Agent settings there."
     echo ""
