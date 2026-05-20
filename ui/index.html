@@ -330,6 +330,99 @@ body {
 
 /* ═══ Chat pane ═══ */
 .chat-area { max-width: 860px; margin: 0 auto; }
+.room-conv-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: start;
+}
+.room-conv-main {
+  max-width: none;
+  margin: 0;
+}
+.room-log-panel {
+  position: sticky;
+  top: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 14px 10px;
+  min-height: 220px;
+}
+.room-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.room-log-title {
+  font-size: 0.8em;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+.room-log-count {
+  font-size: 0.72em;
+  color: var(--text3);
+}
+.room-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  padding-right: 4px;
+}
+.room-log-item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 10px 9px;
+  background: var(--surface2);
+}
+.room-log-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 0.7em;
+  color: var(--text3);
+  font-family: var(--font);
+}
+.room-log-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  padding: 2px 7px;
+  font-size: 0.95em;
+  background: var(--surface);
+}
+.room-log-pill.kind {
+  color: var(--accent);
+}
+.room-log-pill.kind.system {
+  color: var(--amber);
+}
+.room-log-pill.kind.error {
+  color: var(--red);
+}
+.room-log-msg {
+  font-size: 0.84em;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.room-log-empty {
+  text-align: center;
+  padding: 42px 14px;
+  color: var(--text3);
+  font-size: 0.82em;
+}
 .empty-state { text-align: center; padding: 60px 20px; color: var(--text3); }
 .empty-state .icon { font-size: 2.5em; margin-bottom: 10px; opacity: 0.4; }
 .empty-state h3 { color: var(--text2); font-weight: 500; margin-bottom: 6px; font-size: 1em; }
@@ -486,7 +579,7 @@ body {
 .agent-drag-chip .dot { width: 7px; height: 7px; border-radius: 50%; }
 
 /* Room conversation view */
-.room-conv-view { max-width: 860px; margin: 0 auto; }
+.room-conv-view { max-width: 1240px; margin: 0 auto; }
 .conv-header {
   display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
 }
@@ -776,6 +869,9 @@ body {
   .main-content { padding: 0; }
   .tab-pane { padding: 12px; }
   .msg-bubble { max-width: 85%; }
+  .room-conv-body { grid-template-columns: 1fr; }
+  .room-log-panel { position: static; }
+  .room-log-list { max-height: none; }
   .cards-bar { grid-template-columns: 1fr; }
   .discover-grid { grid-template-columns: 1fr; }
 }
@@ -790,7 +886,6 @@ body {
   </div>
   <div class="tab-bar" aria-label="主导航">
     <button class="tab-btn active" data-tab="chat">💬 聊天</button>
-    <button class="tab-btn" data-tab="activity">📡 活动</button>
     <button class="tab-btn" data-tab="agent">Agent</button>
     <button class="tab-btn" data-tab="settings">⚙ 设置</button>
   </div>
@@ -803,67 +898,65 @@ body {
 
 <div class="main-content">
 
-  <!-- ═══ Chat pane ═══ -->
+  <!-- Chat pane -->
   <div class="tab-pane active" id="pane-chat">
 
     <!-- Room grid view (default) -->
     <div id="roomGridView" class="room-grid-view">
       <div class="room-grid-header">
-        <h2 class="room-grid-title">聊天室</h2>
+        <h2 class="room-grid-title">???</h2>
       </div>
       <div id="roomGrid" class="room-grid">
-        <div class="empty-state"><div class="icon">💬</div><h3>加载中…</h3></div>
+        <div class="empty-state"><div class="icon">??</div><h3>????</h3></div>
       </div>
     </div>
 
     <!-- Room conversation view (hidden by default) -->
     <div id="roomConvView" class="room-conv-view" style="display:none">
       <div class="conv-header">
-        <button class="back-btn" id="backToRooms">← 聊天室</button>
+        <button class="back-btn" id="backToRooms">? ???</button>
         <span id="convRoomName" class="conv-room-name"></span>
         <div id="convAgentBadges" class="conv-agent-badges"></div>
         <div id="roomRunControls" class="conv-agent-badges"></div>
       </div>
-      <div class="chat-area">
-        <div class="compose-bar">
-          <select id="composeAgent"></select>
-          <input type="text" id="composeInput" placeholder="输入消息，按 Enter 发送…" />
-          <button class="compose-btn" id="composeBtn">发送→</button>
+      <div class="room-conv-body">
+        <div class="chat-area room-conv-main">
+          <div class="compose-bar">
+            <select id="composeAgent"></select>
+            <input type="text" id="composeInput" placeholder="?????? Enter ???" />
+            <button class="compose-btn" id="composeBtn">???</button>
+          </div>
+          <div class="chat-controls">
+            <input class="chat-search" id="searchInput" type="text" placeholder="?????" />
+            <button class="tool-btn" id="refreshBtn" title="??">?</button>
+          </div>
+          <div id="chatArea"></div>
         </div>
-        <div class="chat-controls">
-          <input class="chat-search" id="searchInput" type="text" placeholder="搜索消息…" />
-          <button class="tool-btn" id="refreshBtn" title="刷新">⟳</button>
-        </div>
-        <div id="chatArea"></div>
+        <aside class="room-log-panel" aria-label="???????">
+          <div class="room-log-header">
+            <div class="room-log-title">?????</div>
+            <div class="room-log-count" id="roomLogCount">0 ?</div>
+          </div>
+          <div id="roomLogArea" class="room-log-list"></div>
+        </aside>
       </div>
     </div>
 
   </div>
-  </div>
 
-  <!-- ═══ Agent pane ═══ -->
+  <!-- Agent pane -->
   <div class="tab-pane" id="pane-agent">
     <div class="agent-area" id="agentArea">
-      <div class="empty-state">加载中…</div>
+      <div class="empty-state">????</div>
     </div>
   </div>
 
-  <!-- ═══ Activity pane ═══ -->
-  <div class="tab-pane" id="pane-activity">
-    <div class="activity-timeline" id="activityArea">
-      <div class="activity-empty">
-        <div class="icon" style="font-size:2.5em;opacity:0.4">📡</div>
-        <h3 style="color:var(--text2);font-weight:500;margin-top:8px;font-size:1em">暂无活动记录</h3>
-      </div>
-    </div>
-  </div>
-
-  <!-- ═══ Settings pane ═══ -->
+  <!-- Settings pane -->
   <div class="tab-pane" id="pane-settings">
     <div class="settings-area" id="settingsArea">
       <div class="empty-state">
-        <div class="icon" style="font-size:2.5em;opacity:0.4">⚙</div>
-        <h3 style="color:var(--text2);font-weight:500;margin-top:8px;font-size:1em">加载设置…</h3>
+        <div class="icon" style="font-size:2.5em;opacity:0.4">?</div>
+        <h3 style="color:var(--text2);font-weight:500;margin-top:8px;font-size:1em">?????</h3>
       </div>
     </div>
   </div>
@@ -915,7 +1008,8 @@ const statLast = $('#statLast');
 const pollDot = $('#pollDot');
 const pollLabel = $('#pollLabel');
 const pollBtn = $('#pollBtn');
-const activityArea = $('#activityArea');
+const roomLogArea = $('#roomLogArea');
+const roomLogCount = $('#roomLogCount');
 const configBanner = $('#configBanner');
 const themeToggle = $('#themeToggle');
 
@@ -1476,6 +1570,8 @@ function openRoomConversation(roomId) {
     `;
   }
 
+  renderRoomLogs();
+
   // Populate compose select with room agents only
   const sel = $('#composeAgent');
   if (sel) {
@@ -1529,35 +1625,39 @@ async function loadRoomMessages() {
   const q = (state.searchQuery || '').toLowerCase();
   state.messages = (data.messages || []).filter(m => !q || String(m.msg || '').toLowerCase().includes(q));
   renderMessages();
+  renderRoomLogs();
   updateStats();
 }
 
 // ═══ Activity ═══
-async function loadActivity() {
-  const data = await apiPost('/api/poll/history', {limit: 50});
-  if (!data || !data.ok || !data.history || !data.history.length) {
-    activityArea.innerHTML = '<div class="activity-empty"><div style="font-size:2.5em;opacity:0.4">📡</div><h3 style="color:var(--text2);font-weight:500;margin-top:8px;font-size:1em">暂无活动记录</h3><p style="color:var(--text3);font-size:0.85em;margin-top:4px">轮询运行后这里会显示检查结果。</p></div>';
+function renderRoomLogs() {
+  if (!roomLogArea || !roomLogCount) return;
+  const msgs = state.messages || [];
+  roomLogCount.textContent = `${msgs.length} ?`;
+  if (!msgs.length) {
+    roomLogArea.innerHTML = '<div class="room-log-empty">??????????</div>';
     return;
   }
-  let html = '';
-  for (const h of data.history.slice().reverse()) {
-    const ts = h.ts || '', time = ts.slice(11,19);
-    let icon = '○', title = '轮询检查', detail = '无新消息', cls = '';
-    if (h.archived) { icon = '📦'; title = '归档'; detail = `已归档为 ${h.archived}`; }
-    else if (h.delivered) { icon = '→'; title = `发送 ${h.new_msgs} 条消息给 ${h.to_agent}`; detail = '已投递'; }
-    else if (h.error) { icon = '✗'; title = '轮询失败'; detail = h.error; cls = 'error'; }
-    html += `<div class="activity-item">
-      <span class="activity-time">${time}</span>
-      <span class="activity-icon">${icon}</span>
-      <div class="activity-body">
-        <div class="activity-title">${title}</div>
-        <div class="activity-detail ${cls}">${detail}</div>
-      </div></div>`;
-  }
-  activityArea.innerHTML = html;
+  roomLogArea.innerHTML = msgs.map((m, idx) => {
+    const ts = esc(String(m.ts || ''));
+    const from = esc(String(m.from || 'unknown'));
+    const to = esc(String(m.to || ''));
+    const kind = String(m.kind || 'agent');
+    const kindClass = kind === 'error' ? 'error' : (kind === 'system' ? 'system' : '');
+    const text = esc(String(m.msg || ''));
+    const meta = m.meta && typeof m.meta === 'object' ? esc(JSON.stringify(m.meta)) : '';
+    return `<div class="room-log-item" data-log-idx="${idx}">
+      <div class="room-log-meta">
+        <span class="room-log-pill">${ts}</span>
+        <span class="room-log-pill kind ${kindClass}">${esc(kind)}</span>
+        <span class="room-log-pill">${from}${to ? ` ? ${to}` : ''}</span>
+        ${meta ? `<span class="room-log-pill">${meta}</span>` : ''}
+      </div>
+      <div class="room-log-msg">${text}</div>
+    </div>`;
+  }).join('');
 }
 
-// ═══ Settings (form-based editor) ═══
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function escAttr(s) { return esc(s); }
 
@@ -2038,7 +2138,7 @@ pollBtn.addEventListener('click', async () => {
 });
 pollBtn.addEventListener('dblclick', async () => {
   const r = await apiPost('/api/poll/now', {});
-  if (r && r.ok) { await refreshAll(); await loadActivity(); }
+  if (r && r.ok) { await refreshAll(); }
 });
 
 // ═══ Tab switching ═══
@@ -2052,7 +2152,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     state.activeTab = btn.dataset.tab;
     // Lazy load
     if (btn.dataset.tab === 'chat') { loadRooms(); if (state.chatView === 'conversation') loadMessages(); }
-    if (btn.dataset.tab === 'activity') loadActivity();
     if (btn.dataset.tab === 'agent') loadAgentConfig();
     if (btn.dataset.tab === 'settings') loadSettings();
   });
