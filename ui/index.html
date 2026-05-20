@@ -105,7 +105,7 @@ html { scroll-behavior: smooth; }
 body {
   background: var(--bg); color: var(--text);
   font-family: var(--font-ui); line-height: 1.6; font-size: 15px;
-  min-height: 100vh; display: flex; flex-direction: column;
+  min-height: 100vh; overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   letter-spacing: -0.01em;
@@ -113,73 +113,107 @@ body {
 ::selection { background: var(--accent); color: #fff; }
 ::-moz-selection { background: var(--accent); color: #fff; }
 
-/* ═══ Header ═══ */
-.header {
+/* ═══ App Shell ═══ */
+.app-shell {
+  display: flex; height: 100vh; overflow: hidden;
+}
+
+/* ═══ Sidebar ═══ */
+.sidebar {
+  width: 220px; flex-shrink: 0;
   background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  padding: var(--space-lg); gap: var(--space-md);
+  user-select: none; z-index: 300;
+}
+.sidebar-brand {
+  display: flex; flex-direction: column; gap: 2px;
+  padding-bottom: var(--space-md);
   border-bottom: 1px solid var(--border);
-  padding: 10px var(--space-xl);
-  display: flex; align-items: center; justify-content: space-between; gap: var(--space-lg);
-  position: sticky; top: 0; z-index: 200;
-  backdrop-filter: blur(12px) saturate(1.2);
-  -webkit-backdrop-filter: blur(12px) saturate(1.2);
 }
-@supports (backdrop-filter: blur(12px)) {
-  .header { background: color-mix(in srgb, var(--surface) 82%, transparent); }
-}
-html[data-theme="light"] .header {
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
-}
-.header-left { display: flex; align-items: center; gap: var(--space-md); flex-shrink: 0; }
 .logo {
   font-family: var(--font); font-size: 1.05em; font-weight: 700;
   background: linear-gradient(135deg, var(--accent), #ff6b8a);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  background-clip: text; letter-spacing: -0.3px;
-  transition: filter var(--transition); cursor: default;
+  background-clip: text; letter-spacing: -0.3px; cursor: default;
 }
-.logo:hover { filter: brightness(1.15); }
-.header-sub { color: var(--text3); font-size: var(--font-xs); font-family: var(--font); }
-.header-right { display: flex; align-items: center; gap: var(--space-sm); flex-shrink: 0; }
-.badge-list { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.theme-toggle {
-  width: 34px; height: 34px;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: var(--surface2); border: 1px solid var(--border);
-  border-radius: var(--radius); color: var(--text2);
-  cursor: pointer; font-size: 0.95em; position: relative; overflow: hidden;
-  transition: all var(--transition), transform var(--transition-fast);
+.sidebar-sub {
+  font-size: var(--font-xs); color: var(--text3); font-family: var(--font);
 }
-.theme-toggle::after {
-  content: ''; position: absolute; inset: 0;
-  background: radial-gradient(circle at center, var(--accent) 0%, transparent 70%);
-  opacity: 0; transition: opacity var(--transition);
-}
-.theme-toggle:hover { background: var(--surface3); color: var(--text); border-color: var(--border-hover); transform: scale(1.05); }
-.theme-toggle:hover::after { opacity: 0.06; }
-.theme-toggle:active { transform: scale(0.92); transition: transform 0.08s ease; }
 
-/* ═══ Tab Bar ═══ */
-.tab-bar {
-  display: flex; align-self: stretch; justify-content: center; flex: 1; gap: 2px;
+/* ═══ Sidebar Navigation ═══ */
+.sidebar-nav {
+  display: flex; flex-direction: column; gap: 2px; flex: 0 0 auto;
 }
 .tab-btn {
-  background: none; border: none;
-  color: var(--text3); padding: 10px var(--space-lg);
-  font-size: var(--font-base); font-family: var(--font-ui); font-weight: 500;
-  cursor: pointer; border-bottom: 2px solid transparent; position: relative;
-  transition: color var(--transition), border-color var(--transition-slow);
-  letter-spacing: 0.01em;
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 10px 12px;
+  background: none; border: none; border-radius: var(--radius);
+  color: var(--text3); cursor: pointer;
+  font-family: var(--font-ui); font-size: var(--font-base);
+  text-align: left; position: relative;
+  transition: all var(--transition-fast);
 }
-.tab-btn::before {
-  content: ''; position: absolute; inset: 4px 2px; border-radius: var(--radius-sm);
-  background: var(--accent); opacity: 0; transition: opacity var(--transition);
-  z-index: -1;
+.tab-btn .nav-icon { font-size: 1.1em; width: 22px; text-align: center; flex-shrink: 0; transition: transform var(--transition); }
+.tab-btn .nav-label { font-weight: 500; }
+.tab-btn .nav-hint { font-size: var(--font-xs); color: var(--text3); margin-left: auto; opacity: 0; transition: opacity var(--transition); }
+.tab-btn:hover { background: var(--surface2); color: var(--text2); }
+.tab-btn:hover .nav-hint { opacity: 0.6; }
+.tab-btn:hover .nav-icon { transform: scale(1.1); }
+.tab-btn.active { background: var(--surface2); color: var(--text); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+.tab-btn.active .nav-hint { opacity: 0.7; color: var(--accent); }
+.tab-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.sidebar-spacer { flex: 1; min-height: var(--space-md); }
+
+/* ═══ Sidebar Status ═══ */
+.sidebar-status {
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: var(--space-sm);
 }
-.tab-btn:hover { color: var(--text2); }
-.tab-btn:hover::before { opacity: 0.04; }
-.tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
-.tab-btn.active::before { opacity: 0; }
-.tab-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
+.sidebar-stat { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.sidebar-stat-label { font-size: var(--font-xs); color: var(--text3); }
+.sidebar-stat-value { font-size: var(--font-base); font-weight: 600; color: var(--text2); font-family: var(--font); }
+.sidebar-stat-sub { font-size: var(--font-xs); color: var(--text3); font-family: var(--font); width: 100%; }
+.poll-block {
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--font-xs); color: var(--text3);
+}
+.poll-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.poll-dot.active { background: var(--green); box-shadow: 0 0 8px rgba(78,205,196,0.6); animation: breathe 2s ease-in-out infinite; }
+.poll-dot.stopped { background: var(--text3); }
+.poll-toggle {
+  margin-left: auto;
+  background: none; border: 1px solid var(--border); color: var(--text3);
+  padding: 2px 10px; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 0.85em; font-family: var(--font);
+  transition: all var(--transition-fast);
+}
+.poll-toggle:hover { background: var(--surface2); color: var(--text2); border-color: var(--border-hover); }
+
+/* ═══ Theme Toggle (Sidebar) ═══ */
+.theme-toggle {
+  width: 100%; padding: 8px;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text2);
+  cursor: pointer; font-size: 0.9em;
+  transition: all var(--transition), transform var(--transition-fast);
+}
+.theme-toggle:hover { background: var(--surface3); color: var(--text); border-color: var(--border-hover); transform: scale(1.02); }
+.theme-toggle:active { transform: scale(0.96); transition: transform 0.08s ease; }
+
+/* ═══ Main Area ═══ */
+.main-area {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg);
+}
+
+/* ═══ Badge List ═══ */
+.badge-list { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
 /* ═══ Agent Badges ═══ */
 .agent-badge {
@@ -331,7 +365,7 @@ html[data-theme="light"] .header {
 /* ═══ Config Banner ═══ */
 .config-banner {
   display: none; background: rgba(255,217,61,0.07); border-bottom: 1px solid rgba(255,217,61,0.15);
-  padding: 10px var(--space-xl); color: var(--amber); font-size: 0.82em;
+  padding: 10px var(--space-xl); color: var(--amber); font-size: 0.82em; flex-shrink: 0;
 }
 .config-banner.show { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); }
 .config-banner button {
@@ -396,7 +430,7 @@ html[data-theme="light"] .header {
 .compose-btn:disabled::after { display: none; }
 
 /* ═══ Main Content ═══ */
-.main-content { flex: 1; overflow-y: auto; }
+.main-content { flex: 1; overflow-y: auto; overflow-x: hidden; }
 .tab-pane { display: none; padding: var(--space-lg) var(--space-xl); }
 .tab-pane.active { display: block; animation: slideUp 0.25s var(--ease-out-expo); }
 
@@ -843,26 +877,6 @@ html[data-theme="light"] .header {
   line-height: 1.5; white-space: pre;
 }
 
-/* ═══ Footer ═══ */
-.footer {
-  background: var(--surface); border-top: 1px solid var(--border);
-  padding: 8px var(--space-xl);
-  display: flex; align-items: center; justify-content: space-between;
-  font-size: var(--font-xs); color: var(--text3); font-family: var(--font);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-}
-.footer-left { display: flex; align-items: center; gap: var(--space-sm); }
-.footer-right { display: flex; align-items: center; gap: var(--space-sm); }
-.footer-stat { color: var(--text2); }
-.poll-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
-.poll-dot.active { background: var(--green); box-shadow: 0 0 8px rgba(78,205,196,0.6); animation: breathe 2s ease-in-out infinite; }
-.poll-dot.stopped { background: var(--text3); }
-.poll-toggle {
-  background: none; border: 1px solid var(--border); color: var(--text3);
-  padding: 1px 8px; border-radius: 4px; cursor: pointer;
-  font-size: 0.9em; font-family: var(--font); transition: all var(--transition);
-}
-.poll-toggle:hover { background: var(--surface2); color: var(--text2); border-color: var(--border-hover); }
 
 /* ═══ Test Agent Modal ═══ */
 .test-modal-overlay {
@@ -994,6 +1008,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 }
 
 @media (max-width: 860px) {
+  .sidebar { width: 180px; padding: var(--space-md); }
+  .sidebar-sub { display: none; }
+  .tab-btn .nav-hint { display: none; }
   .room-conv-body { grid-template-columns: 1fr; }
   .room-log-panel { position: static; }
   .room-log-list { max-height: 320px; }
@@ -1001,19 +1018,34 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   .chat-area { max-width: 100%; }
   .room-conv-view { max-width: 100%; }
   .room-grid-view { max-width: 100%; }
-  .footer { flex-direction: column; gap: var(--space-xs); padding: var(--space-sm) var(--space-md); text-align: center; }
+  .tab-pane { padding: var(--space-md); }
 }
 
 @media (max-width: 600px) {
-  .header { padding: 8px var(--space-md); gap: var(--space-sm); flex-wrap: wrap; }
-  .header-left { width: 100%; }
-  .header-right { position: absolute; top: 10px; right: var(--space-md); }
-  .tab-bar { order: 2; flex-basis: 100%; justify-content: flex-start; overflow-x: auto; }
-  .tab-bar::-webkit-scrollbar { height: 0; }
-  .tab-btn { padding: 8px 14px; font-size: var(--font-sm); white-space: nowrap; }
+  .app-shell { flex-direction: column; }
+  .sidebar {
+    width: 100%; flex-shrink: 0; flex-direction: row;
+    padding: var(--space-sm) var(--space-md); gap: var(--space-sm);
+    align-items: center; border-right: none; border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  .sidebar-brand { flex-direction: row; align-items: baseline; gap: 6px; padding-bottom: 0; border-bottom: none; }
+  .sidebar-nav { flex-direction: row; gap: 2px; }
+  .tab-btn { width: auto; padding: 6px 10px; font-size: var(--font-sm); }
+  .tab-btn .nav-icon { font-size: 1em; width: auto; }
+  .tab-btn .nav-hint { display: none; }
+  .tab-btn.active { box-shadow: inset 0 -2px 0 0 var(--accent); }
+  .sidebar-spacer { display: none; }
+  .sidebar-status { flex-direction: row; align-items: center; gap: var(--space-sm); padding-top: 0; border-top: none; flex-shrink: 0; }
+  .sidebar-stat { flex: 0 0 auto; }
+  .sidebar-stat-sub { display: none; }
+  .sidebar-stat-label { display: none; }
+  .poll-block { flex-shrink: 0; }
+  .theme-toggle { width: auto; padding: 6px 10px; font-size: 0.85em; flex-shrink: 0; }
+  .main-area { flex: 1; min-height: 0; }
   .compose-bar { padding: 8px var(--space-md); flex-wrap: wrap; }
   .compose-bar input { max-width: 100%; }
-  .tab-pane { padding: var(--space-md); }
+  .tab-pane { padding: var(--space-sm) var(--space-md); }
   .cards-bar { grid-template-columns: 1fr; }
   .discover-grid { grid-template-columns: 1fr; }
   .room-grid { grid-template-columns: 1fr; gap: var(--space-sm); }
@@ -1021,9 +1053,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 }
 
 @media (max-width: 480px) {
+  .sidebar { padding: 6px var(--space-sm); gap: 4px; }
+  .tab-btn { padding: 5px 8px; }
   .settings-row { flex-wrap: wrap; }
   .settings-row label { min-width: 100%; }
-  .header-sub { display: none; }
   .msg-bubble { max-width: 94%; }
   .room-card-add { aspect-ratio: auto; min-height: 120px; }
   .modal, .test-modal { margin: 0 12px; padding: var(--space-xl); }
@@ -1032,102 +1065,124 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 </head>
 <body>
 
-<header class="header">
-  <div class="header-left">
-    <span class="logo">agent-bridge</span>
-    <span class="header-sub">控制中心</span>
-  </div>
-  <div class="tab-bar" aria-label="主导航">
-    <button class="tab-btn active" data-tab="chat">💬 聊天</button>
-    <button class="tab-btn" data-tab="agent">Agent</button>
-    <button class="tab-btn" data-tab="settings">⚙ 设置</button>
-  </div>
-  <div class="header-right">
+<div class="app-shell">
+
+  <!-- ═══ Sidebar ═══ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <span class="logo">agent-bridge</span>
+      <span class="sidebar-sub">控制中心</span>
+    </div>
+
+    <nav class="sidebar-nav" aria-label="主导航">
+      <button class="tab-btn active" data-tab="chat">
+        <span class="nav-icon">💬</span>
+        <span class="nav-label">聊天</span>
+        <span class="nav-hint">Chat</span>
+      </button>
+      <button class="tab-btn" data-tab="agent">
+        <span class="nav-icon">🤖</span>
+        <span class="nav-label">Agent</span>
+        <span class="nav-hint">配置</span>
+      </button>
+      <button class="tab-btn" data-tab="settings">
+        <span class="nav-icon">⚙</span>
+        <span class="nav-label">设置</span>
+        <span class="nav-hint">Settings</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-spacer"></div>
+
+    <div class="sidebar-status">
+      <div class="sidebar-stat" id="statBlock">
+        <span class="sidebar-stat-label">消息</span>
+        <span class="sidebar-stat-value" id="statCount">—</span>
+        <span class="sidebar-stat-sub" id="statLast"></span>
+      </div>
+      <div class="poll-block">
+        <span class="poll-dot" id="pollDot"></span>
+        <span id="pollLabel">轮询</span>
+        <button class="poll-toggle" id="pollBtn" title="切换轮询">∥</button>
+      </div>
+    </div>
+
     <button class="theme-toggle" id="themeToggle" type="button" title="切换明暗色模式" aria-label="切换明暗色模式">☀</button>
-  </div>
-</header>
+  </aside>
 
-<div class="config-banner" id="configBanner"></div>
+  <!-- ═══ Main Area ═══ -->
+  <div class="main-area">
+    <div class="config-banner" id="configBanner"></div>
 
-<div class="main-content">
+    <main class="main-content">
 
-  <!-- Chat pane -->
-  <div class="tab-pane active" id="pane-chat">
+      <!-- Chat pane -->
+      <section class="tab-pane active" id="pane-chat" aria-label="聊天">
 
-    <!-- Room grid view (default) -->
-    <div id="roomGridView" class="room-grid-view">
-      <div class="room-grid-header">
-        <h2 class="room-grid-title">聊天室</h2>
-      </div>
-      <div id="roomGrid" class="room-grid">
-        <div class="empty-state"><div class="icon">💬</div><h3>加载中…</h3></div>
-      </div>
-    </div>
-
-    <!-- Room conversation view (hidden by default) -->
-    <div id="roomConvView" class="room-conv-view" style="display:none">
-      <div class="conv-header">
-        <button class="back-btn" id="backToRooms">← 聊天室</button>
-        <span id="convRoomName" class="conv-room-name"></span>
-        <div id="convAgentBadges" class="conv-agent-badges"></div>
-        <div id="roomRunControls" class="conv-agent-badges"></div>
-      </div>
-      <div class="room-conv-body">
-        <div class="chat-area room-conv-main">
-          <div class="compose-bar">
-            <select id="composeAgent"></select>
-            <input type="text" id="composeInput" placeholder="输入消息，按 Enter 发送…" />
-            <button class="compose-btn" id="composeBtn">发送</button>
+        <!-- Room grid view (default) -->
+        <article id="roomGridView" class="room-grid-view">
+          <header class="room-grid-header">
+            <h2 class="room-grid-title">聊天室</h2>
+          </header>
+          <div id="roomGrid" class="room-grid">
+            <div class="empty-state"><div class="icon">💬</div><h3>加载中…</h3></div>
           </div>
-          <div class="chat-controls">
-            <input class="chat-search" id="searchInput" type="text" placeholder="搜索消息…" />
-            <button class="tool-btn" id="refreshBtn" title="刷新">⟳</button>
+        </article>
+
+        <!-- Room conversation view (hidden by default) -->
+        <article id="roomConvView" class="room-conv-view" style="display:none">
+          <header class="conv-header">
+            <button class="back-btn" id="backToRooms">← 聊天室</button>
+            <span id="convRoomName" class="conv-room-name"></span>
+            <div id="convAgentBadges" class="conv-agent-badges"></div>
+            <div id="roomRunControls" class="conv-agent-badges"></div>
+          </header>
+          <div class="room-conv-body">
+            <div class="chat-area room-conv-main">
+              <div class="compose-bar">
+                <select id="composeAgent" aria-label="选择发送 Agent"></select>
+                <input type="text" id="composeInput" placeholder="输入消息，按 Enter 发送…" aria-label="消息输入" />
+                <button class="compose-btn" id="composeBtn">发送</button>
+              </div>
+              <div class="chat-controls">
+                <input class="chat-search" id="searchInput" type="text" placeholder="搜索消息…" aria-label="搜索消息" />
+                <button class="tool-btn" id="refreshBtn" title="刷新">⟳</button>
+              </div>
+              <div id="chatArea"></div>
+            </div>
+            <aside class="room-log-panel" aria-label="消息日志">
+              <div class="room-log-header">
+                <h3 class="room-log-title">消息日志</h3>
+                <span class="room-log-count" id="roomLogCount">0 条</span>
+              </div>
+              <div id="roomLogArea" class="room-log-list"></div>
+            </aside>
           </div>
-          <div id="chatArea"></div>
+        </article>
+
+      </section>
+
+      <!-- Agent pane -->
+      <section class="tab-pane" id="pane-agent" aria-label="Agent 配置">
+        <div class="agent-area" id="agentArea">
+          <div class="empty-state">加载中…</div>
         </div>
-        <aside class="room-log-panel" aria-label="消息日志">
-          <div class="room-log-header">
-            <div class="room-log-title">消息日志</div>
-            <div class="room-log-count" id="roomLogCount">0 条</div>
+      </section>
+
+      <!-- Settings pane -->
+      <section class="tab-pane" id="pane-settings" aria-label="设置">
+        <div class="settings-area" id="settingsArea">
+          <div class="empty-state">
+            <div class="icon" style="font-size:2.5em;opacity:0.4">⚙</div>
+            <h3 style="color:var(--text2);font-weight:500;margin-top:8px;font-size:1em">加载设置…</h3>
           </div>
-          <div id="roomLogArea" class="room-log-list"></div>
-        </aside>
-      </div>
-    </div>
+        </div>
+      </section>
 
-  </div>
-
-  <!-- Agent pane -->
-  <div class="tab-pane" id="pane-agent">
-    <div class="agent-area" id="agentArea">
-      <div class="empty-state">加载中…</div>
-    </div>
-  </div>
-
-  <!-- Settings pane -->
-  <div class="tab-pane" id="pane-settings">
-    <div class="settings-area" id="settingsArea">
-      <div class="empty-state">
-        <div class="icon" style="font-size:2.5em;opacity:0.4">⚙</div>
-        <h3 style="color:var(--text2);font-weight:500;margin-top:8px;font-size:1em">加载设置…</h3>
-      </div>
-    </div>
+    </main>
   </div>
 
 </div>
-
-<footer class="footer">
-  <div class="footer-left">
-    <span>消息</span>
-    <span class="footer-stat" id="statCount">—</span>
-    <span class="footer-stat" id="statLast"></span>
-  </div>
-  <div class="footer-right">
-    <span class="poll-dot" id="pollDot"></span>
-    <span id="pollLabel">轮询</span>
-    <button class="poll-toggle" id="pollBtn">∥</button>
-  </div>
-</footer>
 
 <script>
 // ============================================================
