@@ -148,18 +148,19 @@ class TestDefaultConfig(unittest.TestCase):
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    def test_read_bridge_prefers_discovered_agents_over_samples(self):
-        tmpdir = Path(tempfile.mkdtemp(prefix="agent-bridge-default-discovered-"))
+    def test_read_bridge_returns_samples_without_auto_discover(self):
+        """首次创建配置时不再自动扫描本机，只返回示例 Agent。"""
+        tmpdir = Path(tempfile.mkdtemp(prefix="agent-bridge-default-no-auto-"))
         home = tmpdir / "home"
         try:
             home.mkdir()
-            (home / ".codex").mkdir()
+            (home / ".codex").mkdir()  # 本机有 .codex 但不应自动发现
             with patch("pathlib.Path.home", return_value=home):
                 cfg, _ = read_bridge(tmpdir)
-            self.assertIn("codex", cfg["agents"])
-            self.assertNotIn("alice", cfg["agents"])
-            self.assertNotIn("bob", cfg["agents"])
-            self.assertEqual(cfg["agent_id"], "codex")
+            # 应该返回示例 Agent，而不是自动发现 .codex
+            self.assertIn("alice", cfg["agents"])
+            self.assertIn("bob", cfg["agents"])
+            self.assertNotIn("codex", cfg["agents"])
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 

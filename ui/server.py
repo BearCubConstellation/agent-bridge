@@ -199,15 +199,7 @@ def agent_from_discovery(item, color, peers):
 
 
 def default_agents(shared_dir):
-    palette = ["#ff6b6b", "#4ecdc4", "#ffd93d", "#a29bfe", "#fd79a8", "#00cec9"]
-    agents = {}
-    discovered = discover_local_agents(shared_dir, include_bridge_config=False)
-    ids = [a["id"] for a in discovered]
-    for i, item in enumerate(discovered):
-        peers = [aid for aid in ids if aid != item["id"]]
-        agents[item["id"]] = agent_from_discovery(item, palette[i % len(palette)], peers)
-    if agents:
-        return agents
+    """首次创建配置时的示例 Agent，不自动扫描本机。"""
     return sample_agents()
 
 
