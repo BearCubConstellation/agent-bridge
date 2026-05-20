@@ -230,6 +230,18 @@ def _agent_source(path):
         return str(path)
 
 
+def _resolve_env_ref(value):
+    """解析 ${ENV_VAR} 格式的环境变量引用，返回实际值。
+    如果值不是 ${...} 格式，原样返回（非空字符串）。
+    """
+    if not isinstance(value, str):
+        return ""
+    m = re.match(r'^\$\{(\w+)\}$', value.strip())
+    if m:
+        return os.environ.get(m.group(1), "")
+    return value.strip() if value.strip() else ""
+
+
 def _discovered_agent(agent_id, display_name, kind, source, details="", wakeup=None):
     item = {
         "id": agent_id,
@@ -301,17 +313,28 @@ def discover_local_agents(shared_dir, include_bridge_config=True):
         port = extra.get("port", 8644)
         routes = extra.get("routes") or {}
         route = "agent-reply" if "agent-reply" in routes else (next(iter(routes), "agent-reply"))
+        wakeup = {
+            "url": f"http://{host}:{port}/webhooks/{route}",
+            "method": "POST",
+            "body_template": {"message": "{{message}}"},
+        }
+        # 解析 webhook secret：支持 ${ENV_VAR} 引用和直接值
+        raw_secret = webhook.get("secret") or ""
+        secret = _resolve_env_ref(raw_secret)
+        # 也检查路由级别的 secret
+        route_cfg = routes.get(route, {}) if isinstance(routes.get(route), dict) else {}
+        if not secret:
+            raw_secret = route_cfg.get("secret", "")
+            secret = _resolve_env_ref(raw_secret)
+        if secret:
+            wakeup["headers"] = {"Authorization": f"Bearer {secret}"}
         add(_discovered_agent(
             "hermes",
             "Hermes Agent",
             "Hermes",
             hermes_config,
             "检测到 ~/.hermes/config.yaml",
-            {
-                "url": f"http://{host}:{port}/webhooks/{route}",
-                "method": "POST",
-                "body_template": {"message": "{{message}}"},
-            },
+            wakeup,
         ))
     elif (home / ".hermes").exists():
         add(_discovered_agent("hermes", "Hermes Agent", "Hermes", home / ".hermes", "检测到 ~/.hermes 目录"))
