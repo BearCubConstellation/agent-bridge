@@ -357,6 +357,8 @@ body {
   background: rgba(255,217,61,0.08);
 }
 .discover-meta { color: var(--text3); font-size: 0.74em; line-height: 1.45; word-break: break-word; }
+.discover-actions { margin-top: var(--space-sm); display: flex; justify-content: flex-end; }
+.discover-actions .scan-btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 .discover-empty {
   color: var(--text3); border: 1px dashed var(--border);
   border-radius: var(--radius); padding: 14px; font-size: 0.82em;
@@ -1448,9 +1450,12 @@ async function scanAndShowDiscover() {
     el.innerHTML = '<div class="discover-empty">未发现本机 Agent</div>';
     return;
   }
-  el.innerHTML = agents.map(a => {
+  el.innerHTML = agents.map((a, idx) => {
     const status = a.configured ? '已配置' : (a.sample ? '示例' : '未配置');
     const statusClass = a.configured ? 'configured' : (a.sample ? 'sample' : '');
+    const action = a.configured
+      ? '<button class="scan-btn" disabled>已在 agent-bridge</button>'
+      : `<button class="scan-btn" onclick="addDiscoveredAgent(${idx})">添加到 agent-bridge</button>`;
     return `<div class="discover-card">
       <div class="discover-card-header">
         <span class="discover-name">📡 ${esc(a.display_name || a.id)}</span>
@@ -1459,8 +1464,77 @@ async function scanAndShowDiscover() {
       <div class="discover-meta">${esc(a.kind || 'Agent')} · ${esc(a.id)}</div>
       <div class="discover-meta">${esc(a.details || '')}</div>
       <div class="discover-meta">${esc(a.source || '')}</div>
+      <div class="discover-actions">${action}</div>
     </div>`;
   }).join('');
+}
+
+function populateAgentCard(card, agent) {
+  if (!card || !agent) return;
+  const color = agent.color || '#8888a0';
+  card.querySelector('.ag-id').value = agent.id || '';
+  card.querySelector('.ag-name').value = agent.display_name || agent.id || '';
+  card.querySelector('.ag-color').value = color;
+  const preview = card.querySelector('.color-preview');
+  if (preview) preview.style.background = color;
+  const cursor = card.querySelector('.ag-cursor');
+  if (cursor) cursor.value = agent.cursor || 'line';
+
+  const wu = agent.wakeup || {};
+  const section = card.querySelector('.wakeup-section');
+  if (!section) return;
+  section.querySelector('.wu-url').value = wu.url || '';
+  section.querySelector('.wu-method').value = wu.method || 'POST';
+  const auth = wu.auth || {};
+  const authType = section.querySelector('.wu-auth-type');
+  authType.value = auth.type === 'bearer' ? 'bearer' : 'none';
+  authTypeChange(authType);
+  const tokenPath = section.querySelector('.wu-token-path');
+  const tokenJsonpath = section.querySelector('.wu-token-jsonpath');
+  const tokenEnv = section.querySelector('.wu-token-env');
+  if (tokenPath) tokenPath.value = auth.token_path || '';
+  if (tokenJsonpath) tokenJsonpath.value = auth.token_jsonpath || '';
+  if (tokenEnv) tokenEnv.value = auth.token_env || '';
+
+  const headers = wu.headers || {};
+  const headerBox = section.querySelector('.wu-headers');
+  if (headerBox) {
+    headerBox.innerHTML = '';
+    const entries = Object.entries(headers);
+    if (!entries.length) entries.push(['', '']);
+    for (const [k, v] of entries) {
+      const row = document.createElement('div');
+      row.className = 'kv-row';
+      row.innerHTML = '<input type="text" class="header-key" placeholder="Key"/><input type="text" class="header-val" placeholder="Value"/><button class="kv-del" onclick="this.parentElement.remove()" title="删除">×</button>';
+      row.querySelector('.header-key').value = k;
+      row.querySelector('.header-val').value = v;
+      headerBox.appendChild(row);
+    }
+  }
+  const body = section.querySelector('.wu-body');
+  if (body) body.value = bodyTemplateToText(wu.body_template || {"message": "{{message}}"});
+}
+
+function addDiscoveredAgent(index) {
+  const agent = (state.discoveredAgents || [])[index];
+  if (!agent || agent.configured) return;
+  const area = $('#agentArea');
+  const grid = area?.querySelector('.agent-config-grid');
+  if (!grid) return;
+  const exists = Array.from(grid.querySelectorAll('.ag-id')).some(input => input.value.trim() === agent.id);
+  if (exists) {
+    toast('该 Agent 已在配置表单中', 'warning');
+    return;
+  }
+  addAgent();
+  const cards = grid.querySelectorAll('.agent-config');
+  const card = cards[cards.length - 1];
+  populateAgentCard(card, agent);
+  const status = $('#saveStatus');
+  if (status) {
+    status.textContent = '已添加到表单，保存配置后生效';
+    status.className = 'save-status ok';
+  }
 }
 
 // ═══ Compose select ═══
@@ -2216,6 +2290,7 @@ function renderWakeupHtml(wu, idx) {
   const authType = auth.type || 'none';
   const tokenPath = auth.token_path || '';
   const tokenJsonpath = auth.token_jsonpath || '';
+  const tokenEnv = auth.token_env || '';
   const headers = headersToArray(wuData.headers);
   const bodyText = bodyTemplateToText(wuData.body_template);
   
@@ -2256,6 +2331,8 @@ function renderWakeupHtml(wu, idx) {
         <input type="text" class="wu-token-path" value="${escAttr(tokenPath)}" placeholder="~/.openclaw/openclaw.json" />
         <label style="font-size:0.72em;color:var(--text3);margin-top:4px;display:block">JSONPath 提取</label>
         <input type="text" class="wu-token-jsonpath" value="${escAttr(tokenJsonpath)}" placeholder="gateway.auth.password" />
+        <label style="font-size:0.72em;color:var(--text3);margin-top:4px;display:block">Token 环境变量</label>
+        <input type="text" class="wu-token-env" value="${escAttr(tokenEnv)}" placeholder="HERMES_TOKEN" />
       </div>
     </div>
     <div class="wakeup-field">
@@ -2317,6 +2394,7 @@ function collectAgentData(container) {
   const authType = wuSection ? wuSection.querySelector('.wu-auth-type').value : 'none';
   const tokenPath = wuSection ? wuSection.querySelector('.wu-token-path')?.value.trim() || '' : '';
   const tokenJsonpath = wuSection ? wuSection.querySelector('.wu-token-jsonpath')?.value.trim() || '' : '';
+  const tokenEnv = wuSection ? wuSection.querySelector('.wu-token-env')?.value.trim() || '' : '';
   
   const headers = {};
   if (wuSection) {
@@ -2333,6 +2411,8 @@ function collectAgentData(container) {
   const wakeup = {url, method, headers, body_template: bodyTemplate};
   if (authType === 'bearer' && tokenPath) {
     wakeup.auth = {type: 'bearer', token_path: tokenPath, token_jsonpath: tokenJsonpath};
+  } else if (authType === 'bearer' && tokenEnv) {
+    wakeup.auth = {type: 'bearer', token_env: tokenEnv};
   }
   
   return {id, display_name: displayName || id, color, cursor, filter_from: "", wakeup};
@@ -2616,12 +2696,6 @@ async function saveFullConfig() {
   
   if (errors.length) {
     status.textContent = errors.join('; ');
-    status.className = 'save-status error';
-    return;
-  }
-  
-  if (!agents.length) {
-    status.textContent = '至少需要一个 Agent';
     status.className = 'save-status error';
     return;
   }

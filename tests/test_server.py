@@ -128,7 +128,7 @@ class TestServerBase(unittest.TestCase):
 
 
 class TestDefaultConfig(unittest.TestCase):
-    def test_read_bridge_creates_sample_defaults_when_no_agents_exist(self):
+    def test_read_bridge_creates_empty_defaults_when_no_agents_exist(self):
         tmpdir = Path(tempfile.mkdtemp(prefix="agent-bridge-default-"))
         home = tmpdir / "home"
         try:
@@ -136,20 +136,14 @@ class TestDefaultConfig(unittest.TestCase):
             with patch("pathlib.Path.home", return_value=home):
                 cfg, config_path = read_bridge(tmpdir)
             self.assertEqual(cfg["shared_dir"], str(tmpdir))
-            self.assertEqual(cfg["agent_id"], "alice")
-            self.assertIn("alice", cfg["agents"])
-            self.assertIn("bob", cfg["agents"])
-            self.assertTrue(cfg["agents"]["alice"]["sample"])
-            self.assertTrue(cfg["agents"]["bob"]["sample"])
-            self.assertEqual(cfg["agents"]["alice"]["filter_from"], "bob")
-            self.assertEqual(cfg["agents"]["bob"]["filter_from"], "alice")
-            self.assertEqual(cfg["agents"]["alice"]["wakeup"]["url"], "")
+            self.assertEqual(cfg["agent_id"], "")
+            self.assertEqual(cfg["agents"], {})
             self.assertEqual(config_path, tmpdir / "bridge.yaml")
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    def test_read_bridge_returns_samples_without_auto_discover(self):
-        """首次创建配置时不再自动扫描本机，只返回示例 Agent。"""
+    def test_read_bridge_returns_no_agents_without_auto_discover(self):
+        """首次创建配置时不自动扫描本机，也不返回示例 Agent。"""
         tmpdir = Path(tempfile.mkdtemp(prefix="agent-bridge-default-no-auto-"))
         home = tmpdir / "home"
         try:
@@ -157,10 +151,28 @@ class TestDefaultConfig(unittest.TestCase):
             (home / ".codex").mkdir()  # 本机有 .codex 但不应自动发现
             with patch("pathlib.Path.home", return_value=home):
                 cfg, _ = read_bridge(tmpdir)
-            # 应该返回示例 Agent，而不是自动发现 .codex
-            self.assertIn("alice", cfg["agents"])
-            self.assertIn("bob", cfg["agents"])
+            self.assertEqual(cfg["agents"], {})
             self.assertNotIn("codex", cfg["agents"])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_read_bridge_drops_legacy_sample_agents(self):
+        tmpdir = Path(tempfile.mkdtemp(prefix="agent-bridge-default-legacy-sample-"))
+        try:
+            import yaml
+            (tmpdir / "bridge.yaml").write_text(yaml.dump({
+                "shared_dir": str(tmpdir),
+                "agent_id": "alice",
+                "agents": {
+                    "alice": {"id": "alice", "sample": True},
+                    "bob": {"id": "bob", "sample": True},
+                },
+            }), encoding="utf-8")
+
+            cfg, _ = read_bridge(tmpdir)
+
+            self.assertEqual(cfg["agent_id"], "")
+            self.assertEqual(cfg["agents"], {})
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 

@@ -76,7 +76,7 @@ bridge start
 
 这会自动创建共享目录和 `bridge.yaml`，启动 `http://127.0.0.1:7899`，并打开浏览器。
 
-WebUI 会显示必配置项。你只需要在“设置”页填写无法默认的内容，例如本机角色、Agent ID、Webhook URL、认证方式和消息体模板。
+WebUI 不会预置示例 Agent。你可以在“Agent”页手动添加，或先扫描本机 Agent 后点击“添加到 agent-bridge”填入配置表单；随后在“设置”页选择本机角色，并补齐 Webhook URL、认证方式和消息体模板等无法默认的内容。
 
 完成后配置文件长这样（`~/.agent-bridge/bridge.yaml`）：
 

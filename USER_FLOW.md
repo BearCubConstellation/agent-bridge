@@ -52,7 +52,6 @@ bridge start
 
 - 创建共享目录，例如 `~/.agent-bridge`。
 - 生成 `bridge.yaml`。
-- 创建两个示例 Agent。
 - 打开 WebUI。
 
 启动后会生成：
@@ -63,7 +62,7 @@ bridge start
 ~/.agent-bridge/history/
 ```
 
-用户不需要先运行命令行配置向导。不能默认的部分会在 WebUI 的“设置”页显示，例如本机角色、Agent ID、Webhook URL、认证方式和消息体模板。
+用户不需要先运行命令行配置向导。首次进入 WebUI 时不会预置示例 Agent，可在“Agent”页手动添加，或先扫描本机 Agent 后点击“添加到 agent-bridge”填入配置表单。不能默认的部分会在 WebUI 的“设置”页显示，例如本机角色、Agent ID、Webhook URL、认证方式和消息体模板。
 
 如果不想自动打开浏览器：
 

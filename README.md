@@ -52,7 +52,7 @@ powershell -c "irm https://raw.githubusercontent.com/SusuAgent/agent-bridge/main
 bridge start
 ```
 
-首次启动会自动创建默认共享目录和 `bridge.yaml`，并打开 WebUI。能默认的配置会自动填写，必须由用户决定的 Agent ID、Webhook URL、消息体模板等，会在 WebUI 的“设置”页集中展示。
+首次启动会自动创建默认共享目录和 `bridge.yaml`，并打开 WebUI。Agent 不会预置示例数据；你可以在 WebUI 手动添加，或在“Agent”页扫描本机 Agent 后点击“添加到 agent-bridge”填入配置表单。必须由用户决定的本机角色、Webhook URL、消息体模板等，会在 WebUI 的“设置”页集中展示。
 
 如果你只想启动服务而不打开浏览器：
 
@@ -60,7 +60,7 @@ bridge start
 bridge start --no-open
 ```
 
-默认地址是 `http://127.0.0.1:7899`。控制台可以查看对话、编辑 Agent、发送消息、归档当前场景、暂停或恢复轮询。
+默认地址是 `http://127.0.0.1:7899`。控制台可以查看对话、扫描和编辑 Agent、发送消息、归档当前场景、暂停或恢复轮询。
 
 ### 发送一句台词
 

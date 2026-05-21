@@ -146,29 +146,6 @@ def _default_wakeup():
     }
 
 
-def sample_agents():
-    return {
-        "alice": {
-            "id": "alice",
-            "display_name": "Alice",
-            "color": "#ff6b6b",
-            "cursor": "line",
-            "filter_from": "bob",
-            "sample": True,
-            "wakeup": _default_wakeup(),
-        },
-        "bob": {
-            "id": "bob",
-            "display_name": "Bob",
-            "color": "#4ecdc4",
-            "cursor": "line",
-            "filter_from": "alice",
-            "sample": True,
-            "wakeup": _default_wakeup(),
-        },
-    }
-
-
 def generate_room_id():
     return "room_" + uuid.uuid4().hex[:8]
 
@@ -186,21 +163,9 @@ def sync_filter_from(cfg):
                 cfg["agents"][a1]["filter_from"] = a0
 
 
-def agent_from_discovery(item, color, peers):
-    aid = item["id"]
-    return {
-        "id": aid,
-        "display_name": item.get("display_name", aid),
-        "color": color,
-        "cursor": "line",
-        "filter_from": peers[0] if len(peers) == 1 else "",
-        "wakeup": item.get("wakeup") or _default_wakeup(),
-    }
-
-
 def default_agents(shared_dir):
-    """首次创建配置时的示例 Agent，不自动扫描本机。"""
-    return sample_agents()
+    """Return the initial Agent set for a new bridge config."""
+    return {}
 
 
 def _read_yaml_file(path):
@@ -405,15 +370,21 @@ def read_bridge(shared_dir):
         cfg = {}
 
     cfg.setdefault("shared_dir", str(shared_dir))
-    if "agents" not in cfg or not cfg["agents"]:
-        cfg["agents"] = default_agents(shared_dir)
+    agents = cfg.get("agents") or default_agents(shared_dir)
+    if not isinstance(agents, dict):
+        agents = {}
+    cfg["agents"] = {
+        key: a for key, a in agents.items()
+        if isinstance(a, dict) and not a.get("sample")
+    }
     cfg.setdefault("rooms", {})
     cfg.setdefault("agent_id", "")
-    if not cfg["agent_id"] and cfg["agents"]:
-        cfg["agent_id"] = next(iter(cfg["agents"].keys()))
+    if cfg["agent_id"] not in cfg["agents"]:
+        cfg["agent_id"] = next(iter(cfg["agents"].keys()), "")
+    first_agent_key = next(iter(cfg["agents"].keys()), "")
     for key, a in cfg["agents"].items():
         a.setdefault("display_name", a.get("id", key).capitalize())
-        a.setdefault("color", "#ff6b6b" if list(cfg["agents"].keys())[0] == key else "#4ecdc4")
+        a.setdefault("color", "#ff6b6b" if first_agent_key == key else "#4ecdc4")
         a.setdefault("id", key)
         a.setdefault("cursor", "line")
         had_wakeup = "wakeup" in a
@@ -815,6 +786,8 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 saved_agents = []
 
         sync_filter_from(cfg)
+        if cfg.get("agent_id") not in cfg.get("agents", {}):
+            cfg["agent_id"] = next(iter(cfg.get("agents", {}).keys()), "")
         write_bridge(config_path, cfg)
         saved_agents_out = saved_agents if "agents" in body else []
         self.send_json({"ok": True,
