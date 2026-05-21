@@ -593,6 +593,20 @@ body {
   font-size: 0.84em; line-height: 1.55;
   color: var(--text); white-space: pre-wrap; word-break: break-word;
 }
+.room-log-detail {
+  margin-top: 8px; font-size: 0.74em; color: var(--text3);
+}
+.room-log-detail summary {
+  cursor: pointer; user-select: none; width: fit-content;
+  color: var(--text2); transition: color var(--transition-fast);
+}
+.room-log-detail summary:hover { color: var(--text); }
+.room-log-detail pre {
+  margin-top: 6px; padding: 8px; border-radius: var(--radius-sm);
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--text2); white-space: pre-wrap; word-break: break-word;
+  font-family: var(--font); line-height: 1.5;
+}
 .room-log-empty,
 .room-log-loading {
   text-align: center; padding: 42px 14px;
@@ -3297,6 +3311,63 @@ async function loadRoomMessages(roomId = state.currentRoomId, seq = null) {
 }
 
 // Runtime log
+function roomLogEventLabel(event) {
+  const labels = {
+    room_created: '创建聊天室',
+    room_saved: '保存配置',
+    room_started: '开始运行',
+    room_paused: '暂停运行',
+    message_appended: '写入消息',
+    poll_tick: '轮询开始',
+    poll_skipped: '跳过轮询',
+    wakeup_check: '检查唤醒',
+    wakeup_skipped: '未唤醒',
+    no_pending_messages: '未唤醒',
+    waiting_response: '等待回复',
+    response_seen: '检测到回复',
+    delivery_attempt: '调用 Agent',
+    delivery_succeeded: '调用成功',
+    delivery_failed: '调用失败',
+    delivery_blocked: '无法调用',
+    max_turns_reached: '达到轮次上限',
+    room_error: '运行错误',
+    archived: '归档记录',
+  };
+  return labels[event] || event || '运行事件';
+}
+
+function roomLogLevelLabel(level) {
+  if (level === 'error') return '错误';
+  if (level === 'warn') return '注意';
+  return '信息';
+}
+
+function roomLogMessage(log) {
+  const event = String(log.event || '');
+  const msg = String(log.msg || '');
+  if (!msg) return roomLogEventLabel(event);
+  const legacy = {
+    'room configuration saved': '聊天室配置已保存',
+    'room status changed to running': '聊天室已开始运行',
+    'room status changed to paused': '聊天室已暂停',
+    'room poll tick': '开始一次聊天室轮询',
+    'room is not running': '聊天室未运行，本轮不唤醒任何 Agent',
+    'max_turns reached': '已达到最大轮次，聊天室自动暂停',
+  };
+  if (legacy[msg]) return legacy[msg];
+  let m = msg.match(/^message appended from (.+)$/);
+  if (m) return `已写入来自 ${m[1]} 的消息`;
+  m = msg.match(/^no pending messages for (.+)$/);
+  if (m) return `未唤醒 ${m[1]}：没有待处理的新消息`;
+  m = msg.match(/^waiting for (.+) response$/);
+  if (m) return `正在等待 ${m[1]} 回复，本轮不会继续唤醒其他 Agent`;
+  m = msg.match(/^response received from (.+)$/);
+  if (m) return `已检测到 ${m[1]} 的回复，下一轮将进入后续 Agent`;
+  m = msg.match(/^delivering (.+) message\(s\) to (.+)$/);
+  if (m) return `准备唤醒/调用 ${m[2]}，待投递消息 ${m[1]} 条`;
+  return msg;
+}
+
 function renderRoomLogs(options = {}) {
   if (!roomLogArea || !roomLogCount) return;
   const logs = state.roomLogs || [];
@@ -3319,17 +3390,17 @@ function renderRoomLogs(options = {}) {
     const event = String(m.event || 'runtime');
     const agent = esc(String(m.agent || 'room'));
     const levelClass = level === 'error' ? 'error' : (level === 'warn' ? 'warn' : '');
-    const text = esc(String(m.msg || ''));
-    const meta = m.meta && typeof m.meta === 'object' ? esc(JSON.stringify(m.meta)) : '';
+    const text = esc(roomLogMessage(m));
+    const meta = m.meta && typeof m.meta === 'object' ? esc(JSON.stringify(m.meta, null, 2)) : '';
     return `<div class="room-log-item" data-log-idx="${idx}">
       <div class="room-log-meta">
         <span class="room-log-pill">${ts}</span>
-        <span class="room-log-pill kind ${levelClass}">${esc(level)}</span>
-        <span class="room-log-pill">${esc(event)}</span>
+        <span class="room-log-pill kind ${levelClass}">${esc(roomLogLevelLabel(level))}</span>
+        <span class="room-log-pill">${esc(roomLogEventLabel(event))}</span>
         <span class="room-log-pill">${agent}</span>
-        ${meta ? `<span class="room-log-pill">${meta}</span>` : ''}
       </div>
       <div class="room-log-msg">${text}</div>
+      ${meta ? `<details class="room-log-detail"><summary>展开详情</summary><pre>${meta}</pre></details>` : ''}
     </div>`;
   }).join('');
   if (shouldScrollToBottom) {

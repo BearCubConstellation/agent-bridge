@@ -1068,7 +1068,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             shared,
             room_id,
             "room_saved" if existing else "room_created",
-            "room configuration saved",
+            "聊天室配置已保存" if existing else "聊天室已创建",
             meta={"agents": room["agents"], "order": room["order"], "status": room_status},
         )
         self.send_json({"ok": True, "room_id": room_id})
@@ -1194,7 +1194,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             state = set_room_status(shared, room, "running")
             cfg["rooms"][room_id]["status"] = "running"
             write_bridge(config_path, cfg)
-            append_room_log_safely(shared, room_id, "room_started", "room status changed to running")
+            append_room_log_safely(shared, room_id, "room_started", "聊天室已开始运行")
             self.send_json({"ok": True, "room_id": room_id, "state": state})
             return
 
@@ -1202,7 +1202,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             state = set_room_status(shared, room, "paused")
             cfg["rooms"][room_id]["status"] = "paused"
             write_bridge(config_path, cfg)
-            append_room_log_safely(shared, room_id, "room_paused", "room status changed to paused")
+            append_room_log_safely(shared, room_id, "room_paused", "聊天室已暂停")
             self.send_json({"ok": True, "room_id": room_id, "state": state})
             return
 

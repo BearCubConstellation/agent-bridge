@@ -107,6 +107,15 @@ class TestRoomRuntime(unittest.TestCase):
         self.assertEqual(read_room_cursor(self.tmpdir, "room_dev", "alice"), 0)
         self.assertEqual(read_room_logs(self.tmpdir, "room_dev")[-1]["event"], "delivery_blocked")
 
+    def test_no_pending_messages_logs_wakeup_decision(self):
+        result = tick_room(self.config, "room_dev", force=True)
+        logs = read_room_logs(self.tmpdir, "room_dev")
+
+        self.assertFalse(result["delivered"])
+        self.assertEqual(logs[-2]["event"], "wakeup_check")
+        self.assertEqual(logs[-1]["event"], "wakeup_skipped")
+        self.assertIn("未唤醒 alice", logs[-1]["msg"])
+
 
 if __name__ == "__main__":
     unittest.main()

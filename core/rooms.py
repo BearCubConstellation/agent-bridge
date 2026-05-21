@@ -191,7 +191,7 @@ def append_room_message(shared_dir, room_id, from_agent, text, to_agent="", kind
         shared_dir,
         room_id,
         "message_appended",
-        f"message appended from {from_agent}",
+        f"已写入来自 {from_agent} 的消息",
         agent_id=from_agent,
         meta={"kind": kind, "to": to_agent, "chars": len(text or "")},
     )
@@ -322,7 +322,7 @@ def archive_room(shared_dir, room_id):
     state["waiting_for"] = ""
     state["waiting_line"] = 0
     write_room_state(shared_dir, room_id, state)
-    _append_room_log_best_effort(shared_dir, room_id, "archived", f"active log archived to {dest.name}")
+    _append_room_log_best_effort(shared_dir, room_id, "archived", f"已归档当前聊天记录到 {dest.name}")
     return dest.name
 
 
@@ -351,7 +351,7 @@ def tick_room(config, room_id, force=False):
         "new_msgs": 0,
         "error": "",
     }
-    _log_tick(shared_dir, room_id, "poll_tick", "room poll tick", meta={
+    _log_tick(shared_dir, room_id, "poll_tick", "开始一次聊天室轮询", meta={
         "force": bool(force),
         "status": state.get("status", ""),
         "waiting_for": state.get("waiting_for", ""),
@@ -361,14 +361,14 @@ def tick_room(config, room_id, force=False):
         result["ok"] = True
         result["error"] = "room is not running"
         write_room_state(shared_dir, room_id, state)
-        _log_tick(shared_dir, room_id, "poll_skipped", result["error"], meta={"status": state.get("status", "")})
+        _log_tick(shared_dir, room_id, "poll_skipped", "聊天室未运行，本轮不唤醒任何 Agent", meta={"status": state.get("status", "")})
         return result
 
     order = room.get("order", [])
     if not order:
         state["last_error"] = "room has no agents"
         write_room_state(shared_dir, room_id, state)
-        _log_tick(shared_dir, room_id, "room_error", state["last_error"], level="error")
+        _log_tick(shared_dir, room_id, "room_error", "聊天室没有配置 Agent，无法继续轮询", level="error")
         return {**result, "ok": False, "error": state["last_error"]}
 
     active = room_active_file(shared_dir, room_id)
@@ -380,7 +380,7 @@ def tick_room(config, room_id, force=False):
         if not response:
             result["waiting_for"] = waiting_for
             write_room_state(shared_dir, room_id, state)
-            _log_tick(shared_dir, room_id, "waiting_response", f"waiting for {waiting_for} response", agent_id=waiting_for)
+            _log_tick(shared_dir, room_id, "waiting_response", f"正在等待 {waiting_for} 回复，本轮不会继续唤醒其他 Agent", agent_id=waiting_for)
             return result
         current_index = order.index(waiting_for) if waiting_for in order else int(state.get("turn_index", 0))
         next_index = (current_index + 1) % len(order)
@@ -391,7 +391,7 @@ def tick_room(config, room_id, force=False):
         state["last_message_id"] = response.get("id", "")
         result["response_seen"] = True
         write_room_state(shared_dir, room_id, state)
-        _log_tick(shared_dir, room_id, "response_seen", f"response received from {waiting_for}", agent_id=waiting_for, meta={
+        _log_tick(shared_dir, room_id, "response_seen", f"已检测到 {waiting_for} 的回复，下一轮将进入后续 Agent", agent_id=waiting_for, meta={
             "message_id": response.get("id", ""),
             "next_turn_index": next_index,
         })
@@ -401,7 +401,7 @@ def tick_room(config, room_id, force=False):
         state["status"] = "paused"
         state["last_error"] = "max_turns reached"
         write_room_state(shared_dir, room_id, state)
-        _log_tick(shared_dir, room_id, "max_turns_reached", state["last_error"], level="warn", meta={
+        _log_tick(shared_dir, room_id, "max_turns_reached", "已达到最大轮次，聊天室自动暂停", level="warn", meta={
             "turn_count": state.get("turn_count", 0),
             "max_turns": state.get("max_turns", 50),
         })
@@ -415,16 +415,21 @@ def tick_room(config, room_id, force=False):
         state["status"] = "error"
         state["last_error"] = f"unknown agent: {agent_id}"
         write_room_state(shared_dir, room_id, state)
-        _log_tick(shared_dir, room_id, "room_error", state["last_error"], level="error", agent_id=agent_id)
+        _log_tick(shared_dir, room_id, "room_error", f"当前轮到的 Agent 不存在：{agent_id}", level="error", agent_id=agent_id)
         return {**result, "ok": False, "to_agent": agent_id, "error": state["last_error"]}
 
     cursor = read_room_cursor(shared_dir, room_id, agent_id)
     pending = _pending_for_agent(messages, agent_id, cursor)
     result["to_agent"] = agent_id
     result["new_msgs"] = len(pending)
+    _log_tick(shared_dir, room_id, "wakeup_check", f"检查 {agent_id} 是否需要唤醒", agent_id=agent_id, meta={
+        "cursor": cursor,
+        "message_count": len(messages),
+        "pending_count": len(pending),
+    })
     if not pending:
         write_room_state(shared_dir, room_id, state)
-        _log_tick(shared_dir, room_id, "no_pending_messages", f"no pending messages for {agent_id}", agent_id=agent_id, meta={
+        _log_tick(shared_dir, room_id, "wakeup_skipped", f"未唤醒 {agent_id}：没有待处理的新消息", agent_id=agent_id, meta={
             "cursor": cursor,
             "message_count": len(messages),
         })
@@ -446,10 +451,10 @@ def tick_room(config, room_id, force=False):
         state["status"] = "error"
         state["last_error"] = f"agent '{agent_id}' is not auto-triggerable ({cap.get('type')})"
         write_room_state(shared_dir, room_id, state)
-        _log_tick(shared_dir, room_id, "delivery_blocked", state["last_error"], level="error", agent_id=agent_id, meta=cap)
+        _log_tick(shared_dir, room_id, "delivery_blocked", f"无法唤醒 {agent_id}：该 Agent 未配置可自动调用的适配器", level="error", agent_id=agent_id, meta=cap)
         return {**result, "ok": False, "error": state["last_error"]}
 
-    _log_tick(shared_dir, room_id, "delivery_attempt", f"delivering {len(pending)} message(s) to {agent_id}", agent_id=agent_id, meta={
+    _log_tick(shared_dir, room_id, "delivery_attempt", f"准备唤醒/调用 {agent_id}，待投递消息 {len(pending)} 条", agent_id=agent_id, meta={
         "adapter": cap.get("type"),
         "from": context["from"],
         "new_msgs": len(pending),
@@ -459,7 +464,7 @@ def tick_room(config, room_id, force=False):
         state["status"] = "error"
         state["last_error"] = detail
         write_room_state(shared_dir, room_id, state)
-        _log_tick(shared_dir, room_id, "delivery_failed", detail, level="error", agent_id=agent_id, meta={
+        _log_tick(shared_dir, room_id, "delivery_failed", f"调用 {agent_id} 失败：{detail}", level="error", agent_id=agent_id, meta={
             "adapter": cap.get("type"),
         })
         return {**result, "ok": False, "error": detail}
@@ -475,7 +480,7 @@ def tick_room(config, room_id, force=False):
     result["ok"] = True
     result["delivered"] = True
     result["waiting_for"] = agent_id
-    _log_tick(shared_dir, room_id, "delivery_succeeded", detail, agent_id=agent_id, meta={
+    _log_tick(shared_dir, room_id, "delivery_succeeded", f"已成功唤醒/调用 {agent_id}：{detail}", agent_id=agent_id, meta={
         "cursor": latest_line,
         "turn_count": state["turn_count"],
     })
