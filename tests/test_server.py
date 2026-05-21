@@ -498,6 +498,10 @@ class TestRoomAPI(TestServerBase):
         self.assertEqual(data["count"], 1)
         self.assertEqual(data["messages"][0]["room"], "room_chat")
         self.assertEqual(data["messages"][0]["msg"], "hello room")
+        status, logs = self._get("/api/rooms/room_chat/logs")
+        self.assertEqual(status, 200)
+        self.assertTrue(logs["ok"])
+        self.assertIn("message_appended", [item["event"] for item in logs["logs"]])
 
     def test_update_config_full_rejects_deleting_agent_in_running_room(self):
         self._configure_three_agents()

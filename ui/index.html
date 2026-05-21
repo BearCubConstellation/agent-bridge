@@ -587,6 +587,7 @@ body {
 }
 .room-log-pill.kind { color: var(--accent); }
 .room-log-pill.kind.system { color: var(--amber); }
+.room-log-pill.kind.warn { color: var(--amber); }
 .room-log-pill.kind.error { color: var(--red); }
 .room-log-msg {
   font-size: 0.84em; line-height: 1.55;
@@ -1968,6 +1969,7 @@ textarea:focus,
 .discover-pill.sample,
 .room-log-pill.kind,
 .room-log-pill.kind.system,
+.room-log-pill.kind.warn,
 .room-log-pill.kind.error {
   background: transparent;
   border-color: var(--border);
@@ -1975,7 +1977,8 @@ textarea:focus,
 
 .room-status.waiting,
 .discover-pill.sample,
-.room-log-pill.kind.system {
+.room-log-pill.kind.system,
+.room-log-pill.kind.warn {
   color: var(--amber);
 }
 
@@ -2198,10 +2201,10 @@ pre,
               </div>
               <div id="chatArea"></div>
             </div>
-            <aside class="room-log-panel" aria-label="消息日志">
+            <aside class="room-log-panel" aria-label="&#36816;&#34892;&#26085;&#24535;">
               <div class="room-log-header">
-                <h3 class="room-log-title">消息日志</h3>
-                <span class="room-log-count" id="roomLogCount">0 条</span>
+                <h3 class="room-log-title">&#36816;&#34892;&#26085;&#24535;</h3>
+                <span class="room-log-count" id="roomLogCount">0 &#26465;</span>
               </div>
               <div id="roomLogArea" class="room-log-list"></div>
             </aside>
@@ -2241,7 +2244,7 @@ const VALID_ID_RE = /^[a-zA-Z0-9_-]+$/;
 const DISCOVER_CACHE_KEY = 'agentBridgeDiscoveredAgents';
 
 let state = {
-  messages: [], agents: [], agentIds: [], agentMap: {}, agentAlias: {},
+  messages: [], roomLogs: [], agents: [], agentIds: [], agentMap: {}, agentAlias: {},
   discoveredAgents: null, discoveredAt: '',
   archive: '__active__', searchQuery: '',
   autoRefresh: true, pollInterval: null, pollStatusTimer: null,
@@ -3198,6 +3201,7 @@ function openRoomConversation(roomId) {
   }
 
   state.messages = [];
+  state.roomLogs = [];
   renderSkeletonChat();
   renderRoomLogs({ loading: true });
   updateStats();
@@ -3270,9 +3274,13 @@ if (backToRoomsBtn) {
 async function loadRoomMessages(roomId = state.currentRoomId, seq = null) {
   if (!roomId) return;
   const requestSeq = seq == null ? ++state.roomViewSeq : seq;
-  const data = await apiGet(`/api/rooms/${encodeURIComponent(roomId)}/messages`);
-  if (!data || !data.ok) {
-    if (state.currentRoomId === roomId && state.roomViewSeq === requestSeq && state.messages.length === 0) {
+  const encodedRoomId = encodeURIComponent(roomId);
+  const [data, logsData] = await Promise.all([
+    apiGet(`/api/rooms/${encodedRoomId}/messages`),
+    apiGet(`/api/rooms/${encodedRoomId}/logs`),
+  ]);
+  if ((!data || !data.ok) && (!logsData || !logsData.ok)) {
+    if (state.currentRoomId === roomId && state.roomViewSeq === requestSeq && state.messages.length === 0 && state.roomLogs.length === 0) {
       renderMessages();
       renderRoomLogs();
       updateStats();
@@ -3281,42 +3289,44 @@ async function loadRoomMessages(roomId = state.currentRoomId, seq = null) {
   }
   if (state.currentRoomId !== roomId || state.roomViewSeq !== requestSeq) return;
   const q = (state.searchQuery || '').toLowerCase();
-  state.messages = (data.messages || []).filter(m => !q || String(m.msg || '').toLowerCase().includes(q));
+  state.messages = data && data.ok ? (data.messages || []).filter(m => !q || String(m.msg || '').toLowerCase().includes(q)) : [];
+  state.roomLogs = logsData && logsData.ok ? (logsData.logs || []) : [];
   renderMessages();
   renderRoomLogs();
   updateStats();
 }
 
-// ═══ Activity ═══
+// Runtime log
 function renderRoomLogs(options = {}) {
   if (!roomLogArea || !roomLogCount) return;
-  const msgs = state.messages || [];
-  roomLogCount.textContent = `${msgs.length} 条`;
-  const shouldScrollToBottom = options.loading || msgs.length === 0 || (
+  const logs = state.roomLogs || [];
+  roomLogCount.textContent = `${logs.length} \u6761`;
+  const shouldScrollToBottom = options.loading || logs.length === 0 || (
     roomLogArea.scrollTop + roomLogArea.clientHeight >= roomLogArea.scrollHeight - 48
   );
-  if (!msgs.length) {
+  if (!logs.length) {
     if (options.loading) {
       roomLogArea.innerHTML = '<div class="skeleton shimmer-overlay" style="height:80px;border-radius:var(--radius)"></div><div class="skeleton shimmer-overlay" style="height:60px;border-radius:var(--radius);margin-top:8px"></div><div class="skeleton shimmer-overlay" style="height:72px;border-radius:var(--radius);margin-top:8px"></div>';
     } else {
-      roomLogArea.innerHTML = '<div class="room-log-empty">暂无消息记录</div>';
+      roomLogArea.innerHTML = '<div class="room-log-empty">&#26242;&#26080;&#36816;&#34892;&#26085;&#24535;</div>';
     }
     roomLogArea.scrollTop = 0;
     return;
   }
-  roomLogArea.innerHTML = msgs.map((m, idx) => {
+  roomLogArea.innerHTML = logs.map((m, idx) => {
     const ts = esc(String(m.ts || ''));
-    const from = esc(String(m.from || 'unknown'));
-    const to = esc(String(m.to || ''));
-    const kind = String(m.kind || 'agent');
-    const kindClass = kind === 'error' ? 'error' : (kind === 'system' ? 'system' : '');
+    const level = String(m.level || 'info');
+    const event = String(m.event || 'runtime');
+    const agent = esc(String(m.agent || 'room'));
+    const levelClass = level === 'error' ? 'error' : (level === 'warn' ? 'warn' : '');
     const text = esc(String(m.msg || ''));
     const meta = m.meta && typeof m.meta === 'object' ? esc(JSON.stringify(m.meta)) : '';
     return `<div class="room-log-item" data-log-idx="${idx}">
       <div class="room-log-meta">
         <span class="room-log-pill">${ts}</span>
-        <span class="room-log-pill kind ${kindClass}">${esc(kind)}</span>
-        <span class="room-log-pill">${from}${to ? ` → ${to}` : ''}</span>
+        <span class="room-log-pill kind ${levelClass}">${esc(level)}</span>
+        <span class="room-log-pill">${esc(event)}</span>
+        <span class="room-log-pill">${agent}</span>
         ${meta ? `<span class="room-log-pill">${meta}</span>` : ''}
       </div>
       <div class="room-log-msg">${text}</div>
@@ -3325,7 +3335,6 @@ function renderRoomLogs(options = {}) {
   if (shouldScrollToBottom) {
     roomLogArea.scrollTop = roomLogArea.scrollHeight;
   }
-  // Staggered entrance for log items
   const items = roomLogArea.querySelectorAll('.room-log-item');
   items.forEach((item, i) => {
     item.style.opacity = '0';

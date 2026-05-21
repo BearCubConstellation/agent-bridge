@@ -33,6 +33,10 @@ def room_active_file(shared_dir, room_id):
     return room_dir(shared_dir, room_id) / "active.jsonl"
 
 
+def room_log_file(shared_dir, room_id):
+    return room_dir(shared_dir, room_id) / "runtime.log"
+
+
 def normalize_room(room_cfg):
     room = dict(room_cfg or {})
     agents = [str(a) for a in room.get("agents", []) if str(a)]
@@ -89,6 +93,41 @@ def ensure_room(shared_dir, room_cfg):
     if not room_yaml.exists() and not (rdir / "room.yaml").exists():
         room_yaml.write_text(json.dumps(room, ensure_ascii=False, indent=2), encoding="utf-8")
     return rdir
+
+
+def append_room_log(shared_dir, room_id, event, message="", level="info", agent_id="", meta=None):
+    path = room_log_file(shared_dir, room_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "room": room_id,
+        "level": level,
+        "event": event,
+        "msg": message,
+    }
+    if agent_id:
+        record["agent"] = agent_id
+    if meta:
+        record["meta"] = meta
+    with file_lock(path.parent / ".runtime.lock"):
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return record
+
+
+def read_room_logs(shared_dir, room_id, limit=500):
+    path = room_log_file(shared_dir, room_id)
+    logs = parse_jsonl(path)
+    if limit and len(logs) > int(limit):
+        logs = logs[-int(limit):]
+    return logs
+
+
+def _append_room_log_best_effort(shared_dir, room_id, event, message="", level="info", agent_id="", meta=None):
+    try:
+        append_room_log(shared_dir, room_id, event, message, level=level, agent_id=agent_id, meta=meta)
+    except Exception:
+        pass
 
 
 def read_room_state(shared_dir, room_id, room_cfg=None):
@@ -148,6 +187,14 @@ def append_room_message(shared_dir, room_id, from_agent, text, to_agent="", kind
     with file_lock(active.parent / ".active.lock"):
         with open(active, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    _append_room_log_best_effort(
+        shared_dir,
+        room_id,
+        "message_appended",
+        f"message appended from {from_agent}",
+        agent_id=from_agent,
+        meta={"kind": kind, "to": to_agent, "chars": len(text or "")},
+    )
     return record
 
 
@@ -275,7 +322,12 @@ def archive_room(shared_dir, room_id):
     state["waiting_for"] = ""
     state["waiting_line"] = 0
     write_room_state(shared_dir, room_id, state)
+    _append_room_log_best_effort(shared_dir, room_id, "archived", f"active log archived to {dest.name}")
     return dest.name
+
+
+def _log_tick(shared_dir, room_id, event, message="", level="info", agent_id="", meta=None):
+    _append_room_log_best_effort(shared_dir, room_id, event, message, level=level, agent_id=agent_id, meta=meta)
 
 
 def tick_room(config, room_id, force=False):
@@ -299,16 +351,24 @@ def tick_room(config, room_id, force=False):
         "new_msgs": 0,
         "error": "",
     }
+    _log_tick(shared_dir, room_id, "poll_tick", "room poll tick", meta={
+        "force": bool(force),
+        "status": state.get("status", ""),
+        "waiting_for": state.get("waiting_for", ""),
+        "turn_count": state.get("turn_count", 0),
+    })
     if state.get("status") != "running" and not force:
         result["ok"] = True
         result["error"] = "room is not running"
         write_room_state(shared_dir, room_id, state)
+        _log_tick(shared_dir, room_id, "poll_skipped", result["error"], meta={"status": state.get("status", "")})
         return result
 
     order = room.get("order", [])
     if not order:
         state["last_error"] = "room has no agents"
         write_room_state(shared_dir, room_id, state)
+        _log_tick(shared_dir, room_id, "room_error", state["last_error"], level="error")
         return {**result, "ok": False, "error": state["last_error"]}
 
     active = room_active_file(shared_dir, room_id)
@@ -320,6 +380,7 @@ def tick_room(config, room_id, force=False):
         if not response:
             result["waiting_for"] = waiting_for
             write_room_state(shared_dir, room_id, state)
+            _log_tick(shared_dir, room_id, "waiting_response", f"waiting for {waiting_for} response", agent_id=waiting_for)
             return result
         current_index = order.index(waiting_for) if waiting_for in order else int(state.get("turn_index", 0))
         next_index = (current_index + 1) % len(order)
@@ -330,12 +391,20 @@ def tick_room(config, room_id, force=False):
         state["last_message_id"] = response.get("id", "")
         result["response_seen"] = True
         write_room_state(shared_dir, room_id, state)
+        _log_tick(shared_dir, room_id, "response_seen", f"response received from {waiting_for}", agent_id=waiting_for, meta={
+            "message_id": response.get("id", ""),
+            "next_turn_index": next_index,
+        })
         return result
 
     if int(state.get("turn_count", 0)) >= int(state.get("max_turns", 50)):
         state["status"] = "paused"
         state["last_error"] = "max_turns reached"
         write_room_state(shared_dir, room_id, state)
+        _log_tick(shared_dir, room_id, "max_turns_reached", state["last_error"], level="warn", meta={
+            "turn_count": state.get("turn_count", 0),
+            "max_turns": state.get("max_turns", 50),
+        })
         return {**result, "ok": True, "error": state["last_error"]}
 
     turn_index = int(state.get("turn_index", 0)) % len(order)
@@ -346,6 +415,7 @@ def tick_room(config, room_id, force=False):
         state["status"] = "error"
         state["last_error"] = f"unknown agent: {agent_id}"
         write_room_state(shared_dir, room_id, state)
+        _log_tick(shared_dir, room_id, "room_error", state["last_error"], level="error", agent_id=agent_id)
         return {**result, "ok": False, "to_agent": agent_id, "error": state["last_error"]}
 
     cursor = read_room_cursor(shared_dir, room_id, agent_id)
@@ -354,6 +424,10 @@ def tick_room(config, room_id, force=False):
     result["new_msgs"] = len(pending)
     if not pending:
         write_room_state(shared_dir, room_id, state)
+        _log_tick(shared_dir, room_id, "no_pending_messages", f"no pending messages for {agent_id}", agent_id=agent_id, meta={
+            "cursor": cursor,
+            "message_count": len(messages),
+        })
         if should_archive_room(active):
             result["archived"] = archive_room(shared_dir, room_id)
         return result
@@ -372,13 +446,22 @@ def tick_room(config, room_id, force=False):
         state["status"] = "error"
         state["last_error"] = f"agent '{agent_id}' is not auto-triggerable ({cap.get('type')})"
         write_room_state(shared_dir, room_id, state)
+        _log_tick(shared_dir, room_id, "delivery_blocked", state["last_error"], level="error", agent_id=agent_id, meta=cap)
         return {**result, "ok": False, "error": state["last_error"]}
 
+    _log_tick(shared_dir, room_id, "delivery_attempt", f"delivering {len(pending)} message(s) to {agent_id}", agent_id=agent_id, meta={
+        "adapter": cap.get("type"),
+        "from": context["from"],
+        "new_msgs": len(pending),
+    })
     delivered, detail = deliver_to_adapter(agent_cfg, text, context["from"], context)
     if not delivered:
         state["status"] = "error"
         state["last_error"] = detail
         write_room_state(shared_dir, room_id, state)
+        _log_tick(shared_dir, room_id, "delivery_failed", detail, level="error", agent_id=agent_id, meta={
+            "adapter": cap.get("type"),
+        })
         return {**result, "ok": False, "error": detail}
 
     latest_line = max(_line_no(m) for m in pending)
@@ -392,6 +475,10 @@ def tick_room(config, room_id, force=False):
     result["ok"] = True
     result["delivered"] = True
     result["waiting_for"] = agent_id
+    _log_tick(shared_dir, room_id, "delivery_succeeded", detail, agent_id=agent_id, meta={
+        "cursor": latest_line,
+        "turn_count": state["turn_count"],
+    })
     return result
 
 

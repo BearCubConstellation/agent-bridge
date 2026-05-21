@@ -13,6 +13,7 @@ from rooms import (  # noqa: E402
     append_room_message,
     ensure_room,
     read_room_cursor,
+    read_room_logs,
     read_room_messages,
     read_room_state,
     tick_room,
@@ -58,10 +59,12 @@ class TestRoomRuntime(unittest.TestCase):
         msg = append_room_message(self.tmpdir, "room_dev", "alice", "hello", to_agent="bob", kind="agent")
 
         messages = read_room_messages(self.tmpdir, "room_dev")
+        logs = read_room_logs(self.tmpdir, "room_dev")
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["id"], msg["id"])
         self.assertEqual(messages[0]["room"], "room_dev")
         self.assertEqual(messages[0]["to"], "bob")
+        self.assertEqual(logs[-1]["event"], "message_appended")
         self.assertTrue((self.tmpdir / "rooms" / "room_dev" / "active.jsonl").exists())
 
     def test_round_robin_waits_for_current_agent_reply_before_advancing(self):
@@ -85,6 +88,11 @@ class TestRoomRuntime(unittest.TestCase):
         self.assertEqual(fourth["to_agent"], "bob")
         self.assertEqual(deliver.call_count, 2)
         self.assertEqual(read_room_cursor(self.tmpdir, "room_dev", "alice"), 1)
+        events = [item["event"] for item in read_room_logs(self.tmpdir, "room_dev")]
+        self.assertIn("delivery_attempt", events)
+        self.assertIn("delivery_succeeded", events)
+        self.assertIn("waiting_response", events)
+        self.assertIn("response_seen", events)
 
     def test_manual_adapter_marks_room_error_without_advancing_cursor(self):
         self.config["agents"]["alice"] = {"id": "alice", "adapter": {"type": "manual"}}
@@ -97,6 +105,7 @@ class TestRoomRuntime(unittest.TestCase):
         self.assertIn("not auto-triggerable", result["error"])
         self.assertEqual(state["status"], "error")
         self.assertEqual(read_room_cursor(self.tmpdir, "room_dev", "alice"), 0)
+        self.assertEqual(read_room_logs(self.tmpdir, "room_dev")[-1]["event"], "delivery_blocked")
 
 
 if __name__ == "__main__":

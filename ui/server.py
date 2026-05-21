@@ -32,8 +32,10 @@ from poll import do_archive, run_poll, load_config as load_poll_config, wakeup_a
 from adapters import adapter_capability, adapter_to_wakeup, normalize_adapter, wakeup_to_adapter
 from rooms import (
     append_room_message,
+    append_room_log,
     ensure_room,
     normalize_room,
+    read_room_logs,
     read_room_messages,
     read_room_state,
     set_room_status,
@@ -175,6 +177,13 @@ def room_label(room):
     name = room.get("name") or room.get("id", "")
     rid = room.get("id", "")
     return f"{name}({rid})" if name and name != rid else rid
+
+
+def append_room_log_safely(shared_dir, room_id, event, message="", level="info", agent_id="", meta=None):
+    try:
+        append_room_log(shared_dir, room_id, event, message, level=level, agent_id=agent_id, meta=meta)
+    except Exception:
+        pass
 
 
 def running_rooms_using_agents(shared_dir, cfg, agent_ids):
@@ -630,6 +639,8 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             routes[path]()
         elif path.startswith("/api/rooms/") and path.endswith("/messages"):
             self.handle_room_messages(path)
+        elif path.startswith("/api/rooms/") and path.endswith("/logs"):
+            self.handle_room_logs(path)
         elif path.startswith("/api/history/"):
             self.handle_history(path)
         else:
@@ -1053,6 +1064,13 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         state["status"] = room_status
         write_room_state(shared, room_id, state)
         write_bridge(config_path, cfg)
+        append_room_log_safely(
+            shared,
+            room_id,
+            "room_saved" if existing else "room_created",
+            "room configuration saved",
+            meta={"agents": room["agents"], "order": room["order"], "status": room_status},
+        )
         self.send_json({"ok": True, "room_id": room_id})
 
     # ─── POST /api/rooms/delete ────────────────────
@@ -1110,6 +1128,19 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         messages = read_room_messages(shared, room_id, include_history=False, limit=500)
         self.send_json({"ok": True, "room_id": room_id, "count": len(messages), "messages": messages})
 
+    def handle_room_logs(self, path):
+        room_id, action = self._parse_room_api_path(path)
+        if action != "logs":
+            self.send_error(404)
+            return
+        shared = Path(self.shared_dir)
+        cfg, _ = read_bridge(shared)
+        if room_id not in cfg.get("rooms", {}):
+            self.send_json({"ok": False, "error": "room not found"})
+            return
+        logs = read_room_logs(shared, room_id, limit=500)
+        self.send_json({"ok": True, "room_id": room_id, "count": len(logs), "logs": logs})
+
     def handle_room_action(self, path):
         room_id, action = self._parse_room_api_path(path)
         if not room_id:
@@ -1163,6 +1194,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             state = set_room_status(shared, room, "running")
             cfg["rooms"][room_id]["status"] = "running"
             write_bridge(config_path, cfg)
+            append_room_log_safely(shared, room_id, "room_started", "room status changed to running")
             self.send_json({"ok": True, "room_id": room_id, "state": state})
             return
 
@@ -1170,6 +1202,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             state = set_room_status(shared, room, "paused")
             cfg["rooms"][room_id]["status"] = "paused"
             write_bridge(config_path, cfg)
+            append_room_log_safely(shared, room_id, "room_paused", "room status changed to paused")
             self.send_json({"ok": True, "room_id": room_id, "state": state})
             return
 
