@@ -956,9 +956,34 @@ body {
 
 /* ═══ Form Grid (Agent Config) ═══ */
 .form-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-xs); }
+.agent-color-control {
+  display: grid;
+  grid-template-columns: 36px 1fr 42px;
+  gap: 7px;
+  align-items: center;
+}
+.agent-color-control .color-preview {
+  width: 36px; height: 24px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+}
+.agent-color-picker {
+  height: 28px; min-width: 42px; padding: 2px;
+  cursor: pointer;
+}
+.agent-color-control .ag-color { font-family: var(--font); font-size: 0.8em; }
+.advanced-agent-settings {
+  margin-top: var(--space-sm); border-top: 1px solid var(--border);
+}
+.advanced-agent-settings summary {
+  cursor: pointer; color: var(--text2); font-size: 0.76em;
+  padding: 8px 0 2px; user-select: none;
+}
+.advanced-agent-settings summary:hover { color: var(--text); }
+.advanced-agent-settings .form-grid { margin-top: var(--space-xs); }
 
 /* ═══ Wakeup Section ═══ */
 .wakeup-section { margin-top: var(--space-sm); padding-top: var(--space-sm); border-top: 1px solid var(--border); }
+.advanced-agent-settings .wakeup-section { border-top: none; padding-top: 0; }
 .wakeup-label {
   font-size: 0.68em; color: var(--text3);
   text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: var(--space-xs);
@@ -1725,6 +1750,11 @@ function populateAgentCard(card, agent) {
   card.querySelector('.ag-color').value = color;
   const preview = card.querySelector('.color-preview');
   if (preview) preview.style.background = color;
+  const picker = card.querySelector('.agent-color-picker');
+  if (picker && /^#[0-9a-fA-F]{6}$/.test(color)) picker.value = color;
+  const dot = card.querySelector('.agent-config-name .dot');
+  if (dot) dot.style.background = color;
+  updateAgentTokenPlaceholders(card);
   const cursor = card.querySelector('.ag-cursor');
   if (cursor) cursor.value = agent.cursor || 'line';
 
@@ -2581,7 +2611,90 @@ function arrayToHeaders(arr) {
   return h;
 }
 
-function renderWakeupHtml(wu, idx) {
+function agentTokenKey(agentId) {
+  const key = String(agentId || '').trim().replace(/[^a-zA-Z0-9_-]/g, '').replace(/^-+|-+$/g, '');
+  return key || 'agent';
+}
+
+function agentTokenEnv(agentId) {
+  return `${agentTokenKey(agentId).replace(/-/g, '_').toUpperCase()}_TOKEN`;
+}
+
+function agentTokenPath(agentId) {
+  return `~/.${agentTokenKey(agentId).toLowerCase()}/token.json`;
+}
+
+function updateAgentTokenPlaceholders(card) {
+  if (!card) return;
+  const agentId = card.querySelector('.ag-id')?.value.trim() || '';
+  const tokenPath = card.querySelector('.wu-token-path');
+  const tokenEnv = card.querySelector('.wu-token-env');
+  if (tokenPath) tokenPath.placeholder = agentTokenPath(agentId);
+  if (tokenEnv) tokenEnv.placeholder = agentTokenEnv(agentId);
+}
+
+function updateAgentColor(input) {
+  const card = input.closest('.agent-config');
+  const value = input.value.trim();
+  const preview = card?.querySelector('.color-preview');
+  const picker = card?.querySelector('.agent-color-picker');
+  const dot = card?.querySelector('.agent-config-name .dot');
+  if (/^#[0-9a-fA-F]{6}$/.test(value)) {
+    if (preview) preview.style.background = value;
+    if (picker) picker.value = value;
+    if (dot) dot.style.background = value;
+  }
+}
+
+function pickAgentColor(input) {
+  const card = input.closest('.agent-config');
+  const colorInput = card?.querySelector('.ag-color');
+  if (!colorInput) return;
+  colorInput.value = input.value;
+  updateAgentColor(colorInput);
+}
+
+function renderAgentBaseFields(a) {
+  const agent = a || {};
+  const color = agent.color || '#8888a0';
+  return `<div class="form-grid">
+    <div class="wakeup-field">
+      <label>Agent ID</label>
+      <input type="text" class="ag-id" value="${escAttr(agent.id || '')}" placeholder="e.g. momo" oninput="updateAgentTokenPlaceholders(this.closest('.agent-config'))" />
+    </div>
+    <div class="wakeup-field">
+      <label>显示名称</label>
+      <input type="text" class="ag-name" value="${escAttr(agent.display_name || agent.id || '')}" placeholder="Display name" />
+    </div>
+    <div class="wakeup-field">
+      <label>颜色</label>
+      <div class="agent-color-control">
+        <span class="color-preview" style="background:${color}"></span>
+        <input type="text" class="ag-color" value="${color}" placeholder="#rrggbb" oninput="updateAgentColor(this)" />
+        <input type="color" class="agent-color-picker" value="${color}" onchange="pickAgentColor(this)" title="选择颜色" />
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderAgentAdvancedHtml(a, idx) {
+  const agent = a || {};
+  return `<details class="advanced-agent-settings">
+    <summary>更多设置</summary>
+    <div class="form-grid">
+      <div class="wakeup-field">
+        <label>游标类型</label>
+        <select class="ag-cursor">
+          <option value="line" ${(agent.cursor||'line')==='line'?'selected':''}>line（行号）</option>
+          <option value="timestamp" ${agent.cursor==='timestamp'?'selected':''}>timestamp（时间戳）</option>
+        </select>
+      </div>
+    </div>
+    ${renderWakeupHtml(agent.wakeup, idx, agent.id || '')}
+  </details>`;
+}
+
+function renderWakeupHtml(wu, idx, agentId='') {
   const wuData = wu || {};
   const url = wuData.url || '';
   const method = wuData.method || 'POST';
@@ -2627,11 +2740,11 @@ function renderWakeupHtml(wu, idx) {
       </select>
       <div class="auth-fields ${authType==='bearer'?'':'hidden'}">
         <label style="font-size:0.72em;color:var(--text3);margin-top:4px;display:block">Token 文件路径</label>
-        <input type="text" class="wu-token-path" value="${escAttr(tokenPath)}" placeholder="~/.openclaw/openclaw.json" />
+        <input type="text" class="wu-token-path" value="${escAttr(tokenPath)}" placeholder="${escAttr(agentTokenPath(agentId))}" />
         <label style="font-size:0.72em;color:var(--text3);margin-top:4px;display:block">JSONPath 提取</label>
         <input type="text" class="wu-token-jsonpath" value="${escAttr(tokenJsonpath)}" placeholder="gateway.auth.password" />
         <label style="font-size:0.72em;color:var(--text3);margin-top:4px;display:block">Token 环境变量</label>
-        <input type="text" class="wu-token-env" value="${escAttr(tokenEnv)}" placeholder="HERMES_TOKEN" />
+        <input type="text" class="wu-token-env" value="${escAttr(tokenEnv)}" placeholder="${escAttr(agentTokenEnv(agentId))}" />
       </div>
     </div>
     <div class="wakeup-field">
@@ -2853,31 +2966,8 @@ function renderAgentConfig(data, area) {
         </div>
         <button class="del-btn" onclick="removeAgent(this)" title="删除此 Agent">🗑</button>
       </div>
-      <div class="form-grid">
-        <div class="wakeup-field">
-          <label>Agent ID</label>
-          <input type="text" class="ag-id" value="${escAttr(a.id)}" placeholder="e.g. momo" />
-        </div>
-        <div class="wakeup-field">
-          <label>显示名称</label>
-          <input type="text" class="ag-name" value="${escAttr(a.display_name || a.id)}" placeholder="Display name" />
-        </div>
-        <div class="wakeup-field">
-          <label>颜色</label>
-          <div style="display:flex;gap:6px;align-items:center">
-            <span class="color-preview" style="background:${color}" onclick="this.nextElementSibling.click()"></span>
-            <input type="text" class="ag-color" value="${color}" placeholder="#rrggbb" style="max-width:90px;font-family:var(--font);font-size:0.8em" oninput="this.previousElementSibling.style.background=this.value" />
-          </div>
-        </div>
-        <div class="wakeup-field">
-          <label>游标类型</label>
-          <select class="ag-cursor">
-            <option value="line" ${(a.cursor||'line')==='line'?'selected':''}>line（行号）</option>
-            <option value="timestamp" ${a.cursor==='timestamp'?'selected':''}>timestamp（时间戳）</option>
-          </select>
-        </div>
-      </div>
-      ${renderWakeupHtml(a.wakeup, i)}
+      ${renderAgentBaseFields(a)}
+      ${renderAgentAdvancedHtml(a, i)}
     </div>`;
   }
 
@@ -2961,31 +3051,8 @@ function addAgent() {
     </div>
     <button class="del-btn" onclick="removeAgent(this)" title="删除此 Agent">🗑</button>
   </div>
-  <div class="form-grid">
-    <div class="wakeup-field">
-      <label>Agent ID</label>
-      <input type="text" class="ag-id" value="" placeholder="e.g. momo" />
-    </div>
-    <div class="wakeup-field">
-      <label>显示名称</label>
-      <input type="text" class="ag-name" value="" placeholder="Display name" />
-    </div>
-    <div class="wakeup-field">
-      <label>颜色</label>
-      <div style="display:flex;gap:6px;align-items:center">
-        <span class="color-preview" style="background:#8888a0" onclick="this.nextElementSibling.click()"></span>
-        <input type="text" class="ag-color" value="#8888a0" placeholder="#rrggbb" style="max-width:90px;font-family:var(--font);font-size:0.8em" oninput="this.previousElementSibling.style.background=this.value" />
-      </div>
-    </div>
-    <div class="wakeup-field">
-      <label>游标类型</label>
-      <select class="ag-cursor">
-        <option value="line" selected>line（行号）</option>
-        <option value="timestamp">timestamp（时间戳）</option>
-      </select>
-    </div>
-  </div>
-  ${renderWakeupHtml({}, idx)}`;
+  ${renderAgentBaseFields({color:'#8888a0'})}
+  ${renderAgentAdvancedHtml({color:'#8888a0', cursor:'line'}, idx)}`;
   
   const grid = container.querySelector('.agent-config-grid');
   if (grid) grid.appendChild(card);
