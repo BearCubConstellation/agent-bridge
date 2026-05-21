@@ -187,6 +187,16 @@ def _agent_source(path):
         return str(path)
 
 
+def _agent_source_dir(path):
+    try:
+        p = path.expanduser()
+        if p.exists() and p.is_file():
+            return str(p.parent)
+        return str(p)
+    except Exception:
+        return str(path)
+
+
 def _env_ref_name(value):
     if not isinstance(value, str):
         return ""
@@ -208,6 +218,7 @@ def _discovered_agent(agent_id, display_name, kind, source, details="", wakeup=N
         "display_name": display_name,
         "kind": kind,
         "source": _agent_source(source),
+        "source_dir": _agent_source_dir(source),
         "details": details,
     }
     if wakeup:
