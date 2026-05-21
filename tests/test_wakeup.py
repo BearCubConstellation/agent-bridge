@@ -99,6 +99,18 @@ class TestResolveToken(unittest.TestCase):
     def test_no_token_path_returns_none(self):
         self.assertIsNone(resolve_token({}))
 
+    def test_env_token(self):
+        old_value = os.environ.get("AGENT_BRIDGE_TEST_TOKEN")
+        try:
+            os.environ["AGENT_BRIDGE_TEST_TOKEN"] = "env-token"
+            result = resolve_token({"token_env": "AGENT_BRIDGE_TEST_TOKEN"})
+            self.assertEqual(result, "env-token")
+        finally:
+            if old_value is None:
+                os.environ.pop("AGENT_BRIDGE_TEST_TOKEN", None)
+            else:
+                os.environ["AGENT_BRIDGE_TEST_TOKEN"] = old_value
+
     def test_missing_file_returns_none(self):
         self.assertIsNone(resolve_token({"token_path": "/nonexistent/file"}))
 

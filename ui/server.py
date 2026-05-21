@@ -222,16 +222,19 @@ def _agent_source(path):
         return str(path)
 
 
-def _resolve_env_ref(value):
-    """解析 ${ENV_VAR} 格式的环境变量引用，返回实际值。
-    如果值不是 ${...} 格式，原样返回（非空字符串）。
-    """
+def _env_ref_name(value):
     if not isinstance(value, str):
         return ""
-    m = re.match(r'^\$\{(\w+)\}$', value.strip())
-    if m:
-        return os.environ.get(m.group(1), "")
-    return value.strip() if value.strip() else ""
+    m = re.match(r'^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$', value.strip())
+    return m.group(1) if m else ""
+
+
+def _apply_bearer_secret_ref(wakeup, value):
+    env_name = _env_ref_name(value)
+    if env_name:
+        wakeup["auth"] = {"type": "bearer", "token_env": env_name}
+        return "env"
+    return "literal" if isinstance(value, str) and value.strip() else ""
 
 
 def _discovered_agent(agent_id, display_name, kind, source, details="", wakeup=None):
@@ -310,22 +313,22 @@ def discover_local_agents(shared_dir, include_bridge_config=True):
             "method": "POST",
             "body_template": {"message": "{{message}}"},
         }
-        # 解析 webhook secret：支持 ${ENV_VAR} 引用和直接值
+        secret_source = ""
         raw_secret = webhook.get("secret") or ""
-        secret = _resolve_env_ref(raw_secret)
-        # 也检查路由级别的 secret
+        secret_source = _apply_bearer_secret_ref(wakeup, raw_secret)
         route_cfg = routes.get(route, {}) if isinstance(routes.get(route), dict) else {}
-        if not secret:
+        if not secret_source:
             raw_secret = route_cfg.get("secret", "")
-            secret = _resolve_env_ref(raw_secret)
-        if secret:
-            wakeup["headers"] = {"Authorization": f"Bearer {secret}"}
+            secret_source = _apply_bearer_secret_ref(wakeup, raw_secret)
+        details = "检测到 ~/.hermes/config.yaml"
+        if secret_source == "literal":
+            details += "；secret 为明文配置，未自动导入"
         add(_discovered_agent(
             "hermes",
             "Hermes Agent",
             "Hermes",
             hermes_config,
-            "检测到 ~/.hermes/config.yaml",
+            details,
             wakeup,
         ))
     elif (home / ".hermes").exists():
@@ -788,12 +791,18 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                     }
                     # Auth (optional)
                     auth = wu.get("auth")
-                    if auth and auth.get("type") == "bearer" and auth.get("token_path"):
-                        wakeup["auth"] = {
-                            "type": "bearer",
-                            "token_path": auth["token_path"],
-                            "token_jsonpath": auth.get("token_jsonpath", ""),
-                        }
+                    if auth and auth.get("type") == "bearer":
+                        if auth.get("token_path"):
+                            wakeup["auth"] = {
+                                "type": "bearer",
+                                "token_path": auth["token_path"],
+                                "token_jsonpath": auth.get("token_jsonpath", ""),
+                            }
+                        elif auth.get("token_env"):
+                            wakeup["auth"] = {
+                                "type": "bearer",
+                                "token_env": auth["token_env"],
+                            }
                     entry["wakeup"] = wakeup
                     entry["adapter"] = a.get("adapter") or wakeup_to_adapter(wakeup)
                     agents_dict[aid] = entry

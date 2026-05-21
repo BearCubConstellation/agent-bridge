@@ -177,6 +177,7 @@ wakeup:
     type: bearer
     token_path: "~/.openclaw/openclaw.json"
     token_jsonpath: "gateway.auth.password"
+    # 或使用环境变量：token_env: "OPENCLAW_TOKEN"
   body_template:
     tool: "sessions_send"
     args:

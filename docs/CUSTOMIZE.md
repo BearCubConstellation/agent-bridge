@@ -25,10 +25,11 @@ agents:
         type: bearer|none
         token_path: <file_path>
         token_jsonpath: <json.path>
+        token_env: <ENV_VAR>
       body_template: {}  # 支持 {{message}} 和 {{from}} 变量
 ```
 
-> 安全提示：`token_path` 指向的文件通常包含 API 密钥。建议设置 `chmod 600` 保护权限。
+> 安全提示：`token_path` 指向的文件通常包含 API 密钥。建议设置 `chmod 600` 保护权限。若 token 已在环境变量中，可使用 `token_env`，避免把密钥写入配置文件。
 
 ---
 

@@ -179,6 +179,7 @@ class TestDefaultConfig(unittest.TestCase):
             (home / ".hermes" / "config.yaml").write_text(
                 "platforms:\n"
                 "  webhook:\n"
+                "    secret: ${HERMES_TEST_SECRET}\n"
                 "    extra:\n"
                 "      host: 127.0.0.1\n"
                 "      port: 8644\n"
@@ -200,6 +201,36 @@ class TestDefaultConfig(unittest.TestCase):
             self.assertIn("codex", ids)
             hermes = next(a for a in agents if a["id"] == "hermes")
             self.assertEqual(hermes["wakeup"]["url"], "http://127.0.0.1:8644/webhooks/agent-reply")
+            self.assertEqual(hermes["wakeup"]["auth"], {"type": "bearer", "token_env": "HERMES_TEST_SECRET"})
+            self.assertNotIn("headers", hermes["wakeup"])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_discover_local_agents_does_not_expose_literal_hermes_secret(self):
+        tmpdir = Path(tempfile.mkdtemp(prefix="agent-bridge-discover-secret-"))
+        home = tmpdir / "home"
+        shared = tmpdir / "shared"
+        try:
+            home.mkdir()
+            shared.mkdir()
+            (home / ".hermes").mkdir()
+            (home / ".hermes" / "config.yaml").write_text(
+                "platforms:\n"
+                "  webhook:\n"
+                "    extra:\n"
+                "      routes:\n"
+                "        agent-reply:\n"
+                "          secret: literal-secret\n",
+                encoding="utf-8",
+            )
+
+            with patch("pathlib.Path.home", return_value=home):
+                agents = discover_local_agents(shared)
+
+            hermes = next(a for a in agents if a["id"] == "hermes")
+            self.assertNotIn("headers", hermes["wakeup"])
+            self.assertNotIn("auth", hermes["wakeup"])
+            self.assertIn("未自动导入", hermes["details"])
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 

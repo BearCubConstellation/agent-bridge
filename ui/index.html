@@ -1454,7 +1454,7 @@ async function scanAndShowDiscover() {
     return `<div class="discover-card">
       <div class="discover-card-header">
         <span class="discover-name">📡 ${esc(a.display_name || a.id)}</span>
-        <span class="discover-pill${statusClass}">${status}</span>
+        <span class="discover-pill ${statusClass}">${status}</span>
       </div>
       <div class="discover-meta">${esc(a.kind || 'Agent')} · ${esc(a.id)}</div>
       <div class="discover-meta">${esc(a.details || '')}</div>

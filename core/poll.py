@@ -181,6 +181,10 @@ def build_body(template, message_text, from_agent):
 
 
 def resolve_token(auth_cfg):
+    token_env = auth_cfg.get("token_env")
+    if token_env:
+        return os.environ.get(token_env) or None
+
     token_path = auth_cfg.get("token_path")
     jsonpath = auth_cfg.get("token_jsonpath", "")
     if not token_path:
