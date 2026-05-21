@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"d:\\\\Workspace\\\\VSCodeWorkspace\\\\agent-bridge\\\\src\" -Directory)",
+      "Bash(Select-Object -ExpandProperty Name)",
+      "Bash(Get-ChildItem -Path \"d:\\\\Workspace\\\\VSCodeWorkspace\\\\agent-bridge\" -Depth 1)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(git commit -m '@ *)",
+      "Bash(git push *)",
+      "Bash(Get-Content \"d:\\\\Workspace\\\\VSCodeWorkspace\\\\agent-bridge\\\\ui\\\\index.html\" -Encoding UTF8)",
+      "Bash(Select-Object -Skip 1370 -First 1)",
+      "Bash(Format-Hex)",
+      "PowerShell($content = Get-Content \"d:\\\\Workspace\\\\VSCodeWorkspace\\\\agent-bridge\\\\ui\\\\index.html\" -Encoding UTF8; $line = $content[1370]; [System.BitConverter]::ToString\\([System.Text.Encoding]::UTF8.GetBytes\\($line\\)\\))",
+      "PowerShell($content = Get-Content \"d:\\\\Workspace\\\\VSCodeWorkspace\\\\agent-bridge\\\\ui\\\\index.html\" -Encoding UTF8; for \\($i = 1364; $i -le 1371; $i++\\) { Write-Output \"$i : $\\($content[$i]\\)\" })",
+      "PowerShell($content = Get-Content \"d:\\\\Workspace\\\\VSCodeWorkspace\\\\agent-bridge\\\\ui\\\\index.html\" -Encoding UTF8; for \\($i = 1405; $i -le 1412; $i++\\) { $line = $content[$i]; Write-Output \"$i : [$line]\" })",
+      "Bash(git commit -m ' *)",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('ui/server.py', doraise=True\\); print\\('server.py: OK'\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('ui/server.py', doraise=True\\); print\\('OK'\\)\")",
+      "Bash(python -m pytest tests/ -x -q)",
+      "Bash(python -m unittest discover tests/ -v)",
+      "Bash(python -m unittest discover tests/)"
+    ]
+  }
+}
