@@ -303,6 +303,39 @@ body {
 
 /* ═══ Agent Config Cards (Settings) ═══ */
 .agent-area { max-width: 1200px; margin: 0 auto; }
+.agent-page {
+  display: flex; flex-direction: column; gap: var(--space-lg);
+}
+.agent-page-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: var(--space-md); padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--border);
+}
+.agent-page-title {
+  font-size: 1.05em; font-weight: 700; color: var(--text);
+}
+.agent-page-subtitle {
+  margin-top: 2px; color: var(--text3); font-size: var(--font-sm);
+}
+.agent-page-count {
+  flex-shrink: 0; border: 1px solid var(--border);
+  border-radius: var(--radius-pill); padding: 4px 10px;
+  color: var(--text2); background: var(--surface2); font-size: var(--font-xs);
+}
+.agent-block {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--space-md);
+}
+.agent-block-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-md); margin-bottom: var(--space-md);
+}
+.agent-block-title {
+  color: var(--text); font-size: 0.9em; font-weight: 700;
+}
+.agent-block-meta {
+  color: var(--text3); font-size: var(--font-xs);
+}
 .agent-page-badges { justify-content: flex-start; margin-bottom: var(--space-md); }
 .agent-section { margin-bottom: var(--space-lg); }
 .agent-section-header {
@@ -321,14 +354,55 @@ body {
 }
 .scan-btn:hover { border-color: var(--border-hover); color: var(--text); background: var(--surface3); transform: translateY(-1px); }
 .scan-btn:active { transform: scale(0.95); transition: transform 0.08s ease; }
+.scan-btn:disabled { opacity: 0.55; cursor: wait; transform: none; }
+.scan-btn.loading::before {
+  content: ""; display: inline-block; width: 10px; height: 10px;
+  margin-right: 6px; border: 2px solid currentColor;
+  border-right-color: transparent; border-radius: 50%;
+  vertical-align: -1px; animation: spin 0.8s linear infinite;
+}
+.scan-panel {
+  background: linear-gradient(180deg, rgba(233,69,96,0.08), rgba(233,69,96,0.025));
+  border: 1px solid rgba(233,69,96,0.28);
+  box-shadow: 0 0 0 1px rgba(233,69,96,0.08), var(--shadow-sm);
+}
+.scan-panel .agent-block-header {
+  align-items: flex-start;
+}
+.scan-title-row {
+  display: flex; align-items: center; gap: 8px;
+}
+.scan-icon {
+  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius); background: rgba(233,69,96,0.12);
+  border: 1px solid rgba(233,69,96,0.22);
+}
+.scan-copy {
+  color: var(--text3); font-size: var(--font-sm); line-height: 1.5; margin-top: 3px;
+}
+.scan-cache-note {
+  color: var(--text3); font-size: var(--font-xs); margin-top: var(--space-sm);
+}
+.discover-loading {
+  display: inline-flex; align-items: center; gap: 8px;
+  color: var(--text2); border: 1px dashed rgba(233,69,96,0.32);
+  background: rgba(233,69,96,0.06);
+  border-radius: var(--radius); padding: 14px 16px; font-size: 0.82em;
+}
+.discover-loading::before {
+  content: ""; width: 14px; height: 14px; border: 2px solid var(--accent);
+  border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite;
+}
 
 /* ═══ Discover Grid ═══ */
 .discover-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  display: flex; flex-wrap: wrap; align-items: stretch;
   gap: var(--space-sm);
 }
 .discover-card {
+  flex: 0 1 280px;
+  width: 280px;
+  max-width: 100%;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -827,7 +901,11 @@ body {
 .agent-config-grid {
   display: flex; flex-wrap: wrap; gap: var(--space-sm);
 }
-.agent-config-grid .agent-config { flex: 1 1 260px; min-width: 240px; }
+.agent-config-grid .agent-config {
+  flex: 0 1 320px;
+  width: 320px;
+  max-width: 100%;
+}
 
 .agent-config {
   background: var(--surface); border: 1px solid var(--border);
@@ -1115,7 +1193,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   .compose-bar input { max-width: 100%; }
   .tab-pane { padding: var(--space-sm) var(--space-md); }
   .cards-bar { grid-template-columns: 1fr; }
-  .discover-grid { grid-template-columns: 1fr; }
+  .agent-page-head, .agent-block-header { align-items: flex-start; flex-direction: column; }
   .room-grid { grid-template-columns: 1fr; gap: var(--space-sm); }
   .test-modal { min-width: 0; margin: 0 16px; padding: 24px var(--space-xl); }
 }
@@ -1258,10 +1336,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 // ============================================================
 
 const VALID_ID_RE = /^[a-zA-Z0-9_-]+$/;
+const DISCOVER_CACHE_KEY = 'agentBridgeDiscoveredAgents';
 
 let state = {
   messages: [], agents: [], agentIds: [], agentMap: {}, agentAlias: {},
-  discoveredAgents: null,
+  discoveredAgents: null, discoveredAt: '',
   archive: '__active__', searchQuery: '',
   autoRefresh: true, pollInterval: null, pollStatusTimer: null,
   editingBadge: null, popupCloseHandler: null,
@@ -1361,6 +1440,35 @@ async function apiPost(p, d) {
   try { const r = await fetch(p, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(d)}); return await r.json(); }
   catch(e) { return null; }
 }
+function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+function readDiscoverCache() {
+  try {
+    const cache = JSON.parse(localStorage.getItem(DISCOVER_CACHE_KEY) || 'null');
+    if (!cache || !Array.isArray(cache.agents)) return null;
+    return cache;
+  } catch (e) {
+    return null;
+  }
+}
+
+function writeDiscoverCache(agents) {
+  const cache = {agents: agents || [], scanned_at: new Date().toISOString()};
+  try { localStorage.setItem(DISCOVER_CACHE_KEY, JSON.stringify(cache)); } catch (e) {}
+  return cache;
+}
+
+function formatScanTime(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('zh-CN', {hour12: false});
+}
+
+function applyDiscoverStatus(agents) {
+  const configured = new Set((state.agents || []).map(a => a.id));
+  return (agents || []).map(a => ({...a, configured: configured.has(a.id)}));
+}
 
 // ═══ Config ═══
 async function loadConfig() {
@@ -1435,22 +1543,25 @@ function renderBadges() {
   }
 }
 
-async function scanAndShowDiscover() {
+function updateScanNote(scannedAt) {
+  const note = $('#scanCacheNote');
+  if (!note) return;
+  const time = formatScanTime(scannedAt);
+  note.textContent = time ? `上次扫描：${time}，结果已保存在本机。` : '尚未扫描，本页只在点击按钮时刷新数据。';
+}
+
+function renderDiscoverAgents(agents, scannedAt) {
   const el = $('#agentDiscoverResult');
   if (!el) return;
-  el.innerHTML = '<div class="discover-empty">扫描中…</div>';
-  const data = await apiGet('/api/agents/discover');
-  if (!data || !data.ok) {
-    el.innerHTML = '<div class="discover-empty">扫描失败</div>';
-    return;
-  }
-  const agents = data.agents || [];
-  state.discoveredAgents = agents;
-  if (!agents.length) {
+  const normalized = applyDiscoverStatus(agents);
+  state.discoveredAgents = normalized;
+  state.discoveredAt = scannedAt || '';
+  updateScanNote(scannedAt);
+  if (!normalized.length) {
     el.innerHTML = '<div class="discover-empty">未发现本机 Agent</div>';
     return;
   }
-  el.innerHTML = agents.map((a, idx) => {
+  el.innerHTML = `<div class="discover-grid">${normalized.map((a, idx) => {
     const status = a.configured ? '已配置' : (a.sample ? '示例' : '未配置');
     const statusClass = a.configured ? 'configured' : (a.sample ? 'sample' : '');
     const action = a.configured
@@ -1466,7 +1577,51 @@ async function scanAndShowDiscover() {
       <div class="discover-meta">${esc(a.source || '')}</div>
       <div class="discover-actions">${action}</div>
     </div>`;
-  }).join('');
+  }).join('')}</div>`;
+}
+
+function renderCachedDiscover() {
+  const cache = readDiscoverCache();
+  const btn = $('#agentScanBtn');
+  if (btn) btn.textContent = cache ? '重新扫描' : '开始扫描';
+  if (!cache) {
+    state.discoveredAgents = null;
+    state.discoveredAt = '';
+    updateScanNote('');
+    const el = $('#agentDiscoverResult');
+    if (el) el.innerHTML = '<div class="discover-empty">暂无扫描结果</div>';
+    return;
+  }
+  renderDiscoverAgents(cache.agents, cache.scanned_at);
+}
+
+async function scanAndShowDiscover() {
+  const el = $('#agentDiscoverResult');
+  const btn = $('#agentScanBtn');
+  if (!el) return;
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('loading');
+    btn.textContent = '扫描中';
+  }
+  el.innerHTML = '<div class="discover-loading">扫描中…</div>';
+  const [data] = await Promise.all([apiGet('/api/agents/discover'), delay(1200)]);
+  if (!data || !data.ok) {
+    el.innerHTML = '<div class="discover-empty">扫描失败</div>';
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('loading');
+      btn.textContent = readDiscoverCache() ? '重新扫描' : '开始扫描';
+    }
+    return;
+  }
+  const cache = writeDiscoverCache(data.agents || []);
+  renderDiscoverAgents(cache.agents, cache.scanned_at);
+  if (btn) {
+    btn.disabled = false;
+    btn.classList.remove('loading');
+    btn.textContent = '重新扫描';
+  }
 }
 
 function populateAgentCard(card, agent) {
@@ -2579,24 +2734,45 @@ function renderAgentConfig(data, area) {
     </div>`;
   }
 
-  area.innerHTML = `<div class="settings-panel">
-    ${checklistHtml}
-    <div class="badge-list agent-page-badges" id="agentBadgeContainer"></div>
-    <div class="agent-config-grid">${agentHtml}</div>
-    <div class="settings-actions">
-      <button class="add-agent-btn" onclick="addAgent()">＋ 添加 Agent</button>
-      <button class="save-btn" onclick="saveFullConfig()">💾 保存配置</button>
-      <span class="save-status" id="saveStatus"></span>
-    </div>
-    <div class="agent-section" style="margin-top:28px;padding-top:20px;border-top:1px solid var(--border)">
-      <div class="agent-section-header">
-        <div class="agent-section-title">扫描本机 Agent</div>
-        <button class="scan-btn" onclick="scanAndShowDiscover()">开始扫描</button>
+  area.innerHTML = `<div class="settings-panel agent-page">
+    <div class="agent-page-head">
+      <div>
+        <div class="agent-page-title">Agent 管理</div>
+        <div class="agent-page-subtitle">配置、保存、扫描分区处理</div>
       </div>
-      <p style="font-size:0.76em;color:var(--text3);margin:4px 0 12px 0;line-height:1.5">
-        扫描本机已安装的 AI Agent 程序，发现的 Agent 可参考配置到上方列表中。
-      </p>
+      <div class="agent-page-count">${agents.length} 个 Agent</div>
+    </div>
+    <div class="agent-block">
+      <div class="agent-block-header">
+        <div>
+          <div class="agent-block-title">已配置 Agent</div>
+          <div class="agent-block-meta">保存后写入 bridge.yaml</div>
+        </div>
+      </div>
+      ${checklistHtml}
+      <div class="badge-list agent-page-badges" id="agentBadgeContainer"></div>
+      <div class="agent-config-grid">${agentHtml}</div>
+      <div class="settings-actions">
+        <button class="add-agent-btn" onclick="addAgent()">＋ 添加 Agent</button>
+        <button class="save-btn" onclick="saveFullConfig()">💾 保存配置</button>
+        <span class="save-status" id="saveStatus"></span>
+      </div>
+    </div>
+    <div class="agent-block scan-panel">
+      <div class="agent-block-header">
+        <div>
+          <div class="scan-title-row">
+            <span class="scan-icon">📡</span>
+            <div>
+              <div class="agent-block-title">扫描本机 Agent</div>
+              <div class="scan-copy">扫描结果保存在本机，仅手动刷新。</div>
+            </div>
+          </div>
+        </div>
+        <button id="agentScanBtn" class="scan-btn" onclick="scanAndShowDiscover()">开始扫描</button>
+      </div>
       <div id="agentDiscoverResult"></div>
+      <div id="scanCacheNote" class="scan-cache-note"></div>
       <details style="margin-top:12px;font-size:0.74em;color:var(--text3)">
         <summary style="cursor:pointer;color:var(--text2);font-size:0.78em;margin-bottom:6px">
           扫描原理说明
@@ -2616,6 +2792,7 @@ function renderAgentConfig(data, area) {
       </details>
     </div>
   </div>`;
+  renderCachedDiscover();
 }
 
 function addAgent() {
@@ -2711,6 +2888,7 @@ async function saveFullConfig() {
     status.textContent = '✓ 配置已保存';
     status.className = 'save-status ok';
     await loadConfig(); // Refresh badges and cards
+    renderCachedDiscover();
     setTimeout(() => { status.textContent = ''; }, 3000);
   } else {
     status.textContent = '保存失败: ' + (r?.error || '服务器错误');
