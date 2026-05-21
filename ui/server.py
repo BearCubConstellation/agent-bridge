@@ -163,6 +163,88 @@ def sync_filter_from(cfg):
                 cfg["agents"][a1]["filter_from"] = a0
 
 
+def room_runtime_status(shared_dir, room):
+    try:
+        state = read_room_state(shared_dir, room["id"], room)
+        return state.get("status", room.get("status", "paused"))
+    except Exception:
+        return room.get("status", "paused")
+
+
+def room_label(room):
+    name = room.get("name") or room.get("id", "")
+    rid = room.get("id", "")
+    return f"{name}({rid})" if name and name != rid else rid
+
+
+def running_rooms_using_agents(shared_dir, cfg, agent_ids):
+    agent_ids = set(agent_ids)
+    rooms = []
+    for key, r in cfg.get("rooms", {}).items():
+        room = normalize_room({**r, "id": r.get("id", key)})
+        if room_runtime_status(shared_dir, room) != "running":
+            continue
+        if agent_ids.intersection(room.get("agents", [])):
+            rooms.append(room)
+    return rooms
+
+
+def update_room_state_refs(shared_dir, room, removed_ids=None, rename_map=None):
+    removed_ids = set(removed_ids or [])
+    rename_map = rename_map or {}
+    try:
+        state = read_room_state(shared_dir, room["id"], room)
+    except Exception:
+        return
+    state["order"] = [
+        rename_map.get(aid, aid)
+        for aid in state.get("order", [])
+        if aid not in removed_ids
+    ]
+    waiting_for = state.get("waiting_for", "")
+    if waiting_for in removed_ids:
+        state["waiting_for"] = ""
+        state["waiting_line"] = 0
+    elif waiting_for in rename_map:
+        state["waiting_for"] = rename_map[waiting_for]
+    write_room_state(shared_dir, room["id"], state)
+
+
+def remove_agents_from_rooms(shared_dir, cfg, removed_ids):
+    removed_ids = set(removed_ids)
+    if not removed_ids:
+        return
+    updated = {}
+    for key, r in cfg.get("rooms", {}).items():
+        room = normalize_room({**r, "id": r.get("id", key)})
+        if not removed_ids.intersection(room.get("agents", [])):
+            updated[room["id"]] = room
+            continue
+        room["agents"] = [aid for aid in room.get("agents", []) if aid not in removed_ids]
+        room["order"] = [aid for aid in room.get("order", []) if aid not in removed_ids]
+        room = normalize_room(room)
+        updated[room["id"]] = room
+        update_room_state_refs(shared_dir, room, removed_ids=removed_ids)
+    cfg["rooms"] = updated
+
+
+def rename_agent_in_rooms(shared_dir, cfg, old_id, new_id):
+    if old_id == new_id:
+        return
+    updated = {}
+    for key, r in cfg.get("rooms", {}).items():
+        room = normalize_room({**r, "id": r.get("id", key)})
+        if old_id not in room.get("agents", []):
+            updated[room["id"]] = room
+            continue
+        room["agents"] = [new_id if aid == old_id else aid for aid in room.get("agents", [])]
+        room["order"] = [new_id if aid == old_id else aid for aid in room.get("order", [])]
+        room = normalize_room(room)
+        updated[room["id"]] = room
+        update_room_state_refs(shared_dir, room, rename_map={old_id: new_id})
+    cfg["rooms"] = updated
+
+
 def default_agents(shared_dir):
     """Return the initial Agent set for a new bridge config."""
     return {}
@@ -684,6 +766,10 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         if errors:
             self.send_json({"ok": False, "error": "; ".join(errors)})
             return
+        new_ids = [a.get("id", "").strip() for a in new_agents_input]
+        if len(set(new_ids)) != len(new_ids):
+            self.send_json({"ok": False, "error": "duplicate agent id"})
+            return
 
         old_lookup = {}
         for key, a in cfg.get("agents", {}).items():
@@ -696,12 +782,23 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             color = item.get("color", "").strip()
 
             if old_id and old_id != new_id and old_id in old_lookup:
+                blockers = running_rooms_using_agents(shared, cfg, {old_id})
+                if blockers:
+                    rooms = ", ".join(room_label(room) for room in blockers)
+                    self.send_json({
+                        "ok": False,
+                        "error": f"agent '{old_id}' is used by running room(s): {rooms}",
+                    })
+                    return
                 old_key, old_agent = old_lookup[old_id]
                 if old_key in cfg["agents"]:
                     del cfg["agents"][old_key]
                 old_agent["id"] = new_id
                 cfg["agents"][new_id] = old_agent
                 cursor_moved = rename_cursor(shared, old_id, new_id)
+                rename_agent_in_rooms(shared, cfg, old_id, new_id)
+                if cfg.get("agent_id") == old_id:
+                    cfg["agent_id"] = new_id
                 changes.append(f"renamed: {old_id} → {new_id}" + (" (cursor)" if cursor_moved else ""))
 
             target_key = None
@@ -752,6 +849,31 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 if errors:
                     self.send_json({"ok": False, "error": "; ".join(errors)})
                     return
+                new_ids = [a.get("id", "").strip() for a in new_agents_list]
+                if len(set(new_ids)) != len(new_ids):
+                    self.send_json({"ok": False, "error": "duplicate agent id"})
+                    return
+
+                rename_map = {}
+                for a in new_agents_list:
+                    aid = a.get("id", "").strip()
+                    old_id = a.get("old_id", "").strip()
+                    if old_id and old_id != aid and old_id in cfg.get("agents", {}):
+                        rename_map[old_id] = aid
+                blockers = []
+                for old_id in rename_map:
+                    blockers.extend(running_rooms_using_agents(shared, cfg, {old_id}))
+                if blockers:
+                    rooms = ", ".join(room_label(room) for room in blockers)
+                    self.send_json({
+                        "ok": False,
+                        "error": f"agent rename blocked by running room(s): {rooms}",
+                    })
+                    return
+                for old_id, aid in rename_map.items():
+                    rename_agent_in_rooms(shared, cfg, old_id, aid)
+                    if cfg.get("agent_id") == old_id:
+                        cfg["agent_id"] = aid
 
                 agents_dict = {}
                 for a in new_agents_list:
@@ -789,10 +911,31 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                     entry["adapter"] = a.get("adapter") or wakeup_to_adapter(wakeup)
                     agents_dict[aid] = entry
 
+                old_ids = set(cfg.get("agents", {}).keys())
+                removed_ids = old_ids - set(rename_map.keys()) - set(agents_dict.keys())
+                blockers = running_rooms_using_agents(shared, cfg, removed_ids)
+                if blockers:
+                    rooms = ", ".join(room_label(room) for room in blockers)
+                    self.send_json({
+                        "ok": False,
+                        "error": f"agent delete blocked by running room(s): {rooms}",
+                    })
+                    return
+                remove_agents_from_rooms(shared, cfg, removed_ids)
                 cfg["agents"] = agents_dict
                 saved_agents = list(agents_dict.keys())
             else:
                 # 传入空列表：清空 agents
+                removed_ids = set(cfg.get("agents", {}).keys())
+                blockers = running_rooms_using_agents(shared, cfg, removed_ids)
+                if blockers:
+                    rooms = ", ".join(room_label(room) for room in blockers)
+                    self.send_json({
+                        "ok": False,
+                        "error": f"agent delete blocked by running room(s): {rooms}",
+                    })
+                    return
+                remove_agents_from_rooms(shared, cfg, removed_ids)
                 cfg["agents"] = {}
                 saved_agents = []
 
@@ -880,6 +1023,16 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         existing_rooms = cfg.get("rooms", {})
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         existing = existing_rooms.get(room_id, {})
+        if existing:
+            existing_room = normalize_room({**existing, "id": room_id})
+            if room_runtime_status(shared, existing_room) == "running":
+                existing_order = existing_room.get("order", [])
+                if existing_room.get("agents", []) != room_agents or existing_order != room_order:
+                    self.send_json({
+                        "ok": False,
+                        "error": "running room members cannot be changed",
+                    })
+                    return
         room = normalize_room({
             "id": room_id,
             "name": room_name or existing.get("name", room_id),
@@ -920,6 +1073,11 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
 
         if room_id not in cfg.get("rooms", {}):
             self.send_json({"ok": False, "error": "room not found"})
+            return
+
+        room = normalize_room({**cfg["rooms"][room_id], "id": room_id})
+        if room_runtime_status(shared, room) == "running":
+            self.send_json({"ok": False, "error": "running room cannot be deleted"})
             return
 
         del cfg["rooms"][room_id]
@@ -981,6 +1139,12 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             if agent_id != "user" and agent_id not in cfg.get("agents", {}):
                 self.send_json({"ok": False, "error": f"unknown agent_id: '{agent_id}'"})
                 return
+            if agent_id != "user" and agent_id not in room.get("agents", []):
+                self.send_json({"ok": False, "error": f"agent is not in room: '{agent_id}'"})
+                return
+            if to_agent and to_agent not in room.get("agents", []):
+                self.send_json({"ok": False, "error": f"target agent is not in room: '{to_agent}'"})
+                return
             if not text:
                 self.send_json({"ok": False, "error": "text required"})
                 return
@@ -989,6 +1153,13 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         if action == "start":
+            if not room.get("agents"):
+                self.send_json({"ok": False, "error": "room has no agents"})
+                return
+            missing = [aid for aid in room.get("agents", []) if aid not in cfg.get("agents", {})]
+            if missing:
+                self.send_json({"ok": False, "error": "room has unknown agent: " + ", ".join(missing)})
+                return
             state = set_room_status(shared, room, "running")
             cfg["rooms"][room_id]["status"] = "running"
             write_bridge(config_path, cfg)

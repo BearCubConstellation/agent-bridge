@@ -437,17 +437,18 @@ class TestMessageAPI(TestServerBase):
 class TestRoomAPI(TestServerBase):
     """Room directory API endpoints."""
 
+    def _agent_payload(self, aid):
+        return {
+            "id": aid,
+            "display_name": aid.capitalize(),
+            "color": "#8888a0",
+            "cursor": "line",
+            "filter_from": "",
+            "wakeup": {"url": "", "method": "POST", "body_template": {"message": "{{message}}"}},
+        }
+
     def _configure_three_agents(self):
-        agents = []
-        for aid in ("alice", "bob", "carol"):
-            agents.append({
-                "id": aid,
-                "display_name": aid.capitalize(),
-                "color": "#8888a0",
-                "cursor": "line",
-                "filter_from": "",
-                "wakeup": {"url": "", "method": "POST", "body_template": {"message": "{{message}}"}},
-            })
+        agents = [self._agent_payload(aid) for aid in ("alice", "bob", "carol")]
         self._put("/api/config/full", {
             "shared_dir": str(self.tmpdir),
             "agent_id": "alice",
@@ -497,6 +498,120 @@ class TestRoomAPI(TestServerBase):
         self.assertEqual(data["count"], 1)
         self.assertEqual(data["messages"][0]["room"], "room_chat")
         self.assertEqual(data["messages"][0]["msg"], "hello room")
+
+    def test_update_config_full_rejects_deleting_agent_in_running_room(self):
+        self._configure_three_agents()
+        self._post("/api/rooms", {
+            "id": "room_running_delete_guard",
+            "name": "Running Delete Guard",
+            "agents": ["alice", "bob"],
+            "order": ["alice", "bob"],
+        })
+        self._post("/api/rooms/room_running_delete_guard/start", {})
+
+        try:
+            status, data = self._put("/api/config/full", {
+                "shared_dir": str(self.tmpdir),
+                "agent_id": "alice",
+                "agents": [self._agent_payload("alice"), self._agent_payload("carol")],
+            })
+
+            self.assertEqual(status, 200)
+            self.assertFalse(data["ok"])
+            self.assertIn("running room", data["error"])
+            status, config = self._get("/api/config")
+            self.assertEqual(status, 200)
+            self.assertIn("bob", {a["id"] for a in config["agents"]})
+        finally:
+            self._post("/api/rooms/room_running_delete_guard/pause", {})
+
+    def test_update_config_full_removes_deleted_agent_from_paused_room(self):
+        self._configure_three_agents()
+        self._post("/api/rooms", {
+            "id": "room_paused_delete_sync",
+            "name": "Paused Delete Sync",
+            "agents": ["alice", "bob"],
+            "order": ["alice", "bob"],
+        })
+
+        status, data = self._put("/api/config/full", {
+            "shared_dir": str(self.tmpdir),
+            "agent_id": "alice",
+            "agents": [self._agent_payload("alice"), self._agent_payload("carol")],
+        })
+
+        self.assertEqual(status, 200)
+        self.assertTrue(data["ok"])
+        status, rooms = self._get("/api/rooms")
+        room = next(r for r in rooms["rooms"] if r["id"] == "room_paused_delete_sync")
+        self.assertEqual(room["agents"], ["alice"])
+        self.assertEqual(room["order"], ["alice"])
+
+    def test_update_config_full_renames_agent_in_paused_room(self):
+        self._configure_three_agents()
+        self._post("/api/rooms", {
+            "id": "room_paused_rename_sync",
+            "name": "Paused Rename Sync",
+            "agents": ["alice", "bob"],
+            "order": ["alice", "bob"],
+        })
+        renamed = self._agent_payload("robert")
+        renamed["old_id"] = "bob"
+
+        status, data = self._put("/api/config/full", {
+            "shared_dir": str(self.tmpdir),
+            "agent_id": "alice",
+            "agents": [self._agent_payload("alice"), renamed, self._agent_payload("carol")],
+        })
+
+        self.assertEqual(status, 200)
+        self.assertTrue(data["ok"])
+        status, rooms = self._get("/api/rooms")
+        room = next(r for r in rooms["rooms"] if r["id"] == "room_paused_rename_sync")
+        self.assertEqual(room["agents"], ["alice", "robert"])
+        self.assertEqual(room["order"], ["alice", "robert"])
+
+    def test_save_room_rejects_member_change_while_running(self):
+        self._configure_three_agents()
+        self._post("/api/rooms", {
+            "id": "room_running_member_guard",
+            "name": "Running Member Guard",
+            "agents": ["alice", "bob"],
+            "order": ["alice", "bob"],
+        })
+        self._post("/api/rooms/room_running_member_guard/start", {})
+
+        try:
+            status, data = self._post("/api/rooms", {
+                "id": "room_running_member_guard",
+                "name": "Running Member Guard",
+                "agents": ["alice", "carol"],
+                "order": ["alice", "carol"],
+            })
+
+            self.assertEqual(status, 200)
+            self.assertFalse(data["ok"])
+            self.assertIn("running room", data["error"])
+        finally:
+            self._post("/api/rooms/room_running_member_guard/pause", {})
+
+    def test_room_send_rejects_non_member_agent(self):
+        self._configure_three_agents()
+        self._post("/api/rooms", {
+            "id": "room_send_member_guard",
+            "name": "Send Member Guard",
+            "agents": ["alice", "bob"],
+            "order": ["alice", "bob"],
+        })
+
+        status, data = self._post("/api/rooms/room_send_member_guard/send", {
+            "agent_id": "carol",
+            "text": "not a member",
+        })
+
+        self.assertEqual(status, 200)
+        self.assertFalse(data["ok"])
+        self.assertIn("not in room", data["error"])
 
 
 class TestOpenCurrentFolderAPI(TestServerBase):

@@ -2682,6 +2682,7 @@ function addHeader(btn, idx) {
 
 function collectAgentData(container) {
   const idx = container.dataset.agentIdx;
+  const oldId = container.dataset.agentId || '';
   const id = container.querySelector('.ag-id').value.trim();
   const displayName = container.querySelector('.ag-name').value.trim();
   const color = container.querySelector('.ag-color').value.trim();
@@ -2714,7 +2715,9 @@ function collectAgentData(container) {
     wakeup.auth = {type: 'bearer', token_env: tokenEnv};
   }
   
-  return {id, display_name: displayName || id, color, cursor, filter_from: "", wakeup};
+  const data = {id, display_name: displayName || id, color, cursor, filter_from: "", wakeup};
+  if (oldId && oldId !== id) data.old_id = oldId;
+  return data;
 }
 
 async function testAgent(btn) {
@@ -2841,7 +2844,7 @@ function renderAgentConfig(data, area) {
   for (let i = 0; i < agents.length; i++) {
     const a = agents[i];
     const color = a.color || '#8888a0';
-    agentHtml += `<div class="agent-config" data-agent-idx="${i}">
+    agentHtml += `<div class="agent-config" data-agent-idx="${i}" data-agent-id="${escAttr(a.id)}">
       <div class="agent-config-header">
         <div class="agent-config-name">
           <span class="agent-config-icon">🤖</span>
@@ -2992,6 +2995,16 @@ function addAgent() {
 async function removeAgent(btn) {
   const card = btn.closest('.agent-config');
   if (!card) return;
+  const agentId = card.dataset.agentId || card.querySelector('.ag-id')?.value.trim() || '';
+  if (agentId) {
+    const roomsData = await apiGet('/api/rooms');
+    const blockers = (roomsData?.rooms || [])
+      .filter(r => r.status === 'running' && (r.agents || []).includes(agentId));
+    if (blockers.length) {
+      toast(`请先暂停正在使用 ${agentId} 的聊天室：${blockers.map(r => r.name || r.id).join('、')}`, 'error');
+      return;
+    }
+  }
   const agentName = card.querySelector('.ag-name')?.value.trim()
     || card.querySelector('.ag-id')?.value.trim()
     || '此 Agent';
