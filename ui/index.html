@@ -623,6 +623,19 @@ html[data-theme="dark"] .brand-logo.logo-dark { display: block; }
   text-align: center; padding: 42px 14px;
   color: var(--text3); font-size: 0.82em;
 }
+.room-log-copy-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface);
+  cursor: pointer; padding: 0; color: var(--text3);
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+.room-log-copy-btn:hover {
+  color: var(--text); border-color: var(--border-hover); background: var(--surface2);
+}
+.room-log-copy-btn.copied {
+  color: var(--green); border-color: var(--green);
+}
 
 /* ═══ Empty State ═══ */
 .empty-state { text-align: center; padding: 64px var(--space-xl); color: var(--text3); animation: fadeIn 0.4s ease; }
@@ -2567,7 +2580,12 @@ pre,
             <aside class="room-log-panel" aria-label="&#36816;&#34892;&#26085;&#24535;">
               <div class="room-log-header">
                 <h3 class="room-log-title">&#36816;&#34892;&#26085;&#24535;</h3>
-                <span class="room-log-count" id="roomLogCount">0 &#26465;</span>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <span class="room-log-count" id="roomLogCount">0 &#26465;</span>
+                  <button class="room-log-copy-btn" id="copyRoomLogsBtn" title="复制运行日志" onclick="copyRoomLogs()">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 011.5-1.5H11"/></svg>
+                  </button>
+                </div>
               </div>
               <div id="roomLogArea" class="room-log-list"></div>
             </aside>
@@ -3794,6 +3812,60 @@ function renderRoomLogs(options = {}) {
       item.style.transform = 'translateX(0)';
     });
   });
+}
+
+async function copyRoomLogs() {
+  const logs = state.roomLogs || [];
+  const messages = state.messages || [];
+  const roomId = state.currentRoomId || '';
+  const btn = document.getElementById('copyRoomLogsBtn');
+  const room = (state.rooms || []).find(r => r.id === roomId);
+  const roomName = room ? (room.display_name || room.name || roomId) : roomId;
+
+  let text = `═══ 聊天室：${roomName} ═══\n`;
+  text += `导出时间：${new Date().toLocaleString('zh-CN')}\n`;
+  text += `消息数：${messages.length} | 日志数：${logs.length}\n`;
+
+  // Chat messages
+  if (messages.length > 0) {
+    text += '\n── 消息记录 ──\n';
+    for (const m of messages) {
+      const ts = m.ts || '';
+      const from = m.from || '';
+      const to = m.to ? `→ ${m.to}` : '';
+      const msg = m.msg || '';
+      text += `[${ts}] ${from}${to ? ' ' + to : ''}: ${msg}\n`;
+    }
+  }
+
+  // Runtime logs
+  if (logs.length > 0) {
+    text += '\n── 运行日志 ──\n';
+    for (const log of logs) {
+      const ts = log.ts || '';
+      const level = log.level || 'info';
+      const event = log.event || '';
+      const agent = log.agent || '';
+      const msg = log.msg || '';
+      const metaStr = log.meta ? ' | ' + JSON.stringify(log.meta) : '';
+      text += `[${ts}] [${level}] ${agent ? agent + ' ' : ''}${event}: ${msg}${metaStr}\n`;
+    }
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn) {
+      btn.classList.add('copied');
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.5 3.5L13 5"/></svg>';
+      setTimeout(() => {
+        btn.classList.remove('copied');
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 011.5-1.5H11"/></svg>';
+      }, 1500);
+    }
+    toast(`已复制 ${messages.length} 条消息 + ${logs.length} 条日志`, 'ok');
+  } catch (e) {
+    toast('复制失败：' + e.message, 'error');
+  }
 }
 
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }

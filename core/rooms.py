@@ -187,13 +187,14 @@ def append_room_message(shared_dir, room_id, from_agent, text, to_agent="", kind
     with file_lock(active.parent / ".active.lock"):
         with open(active, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    preview = (text or "")[:80].replace("\n", " ")
     _append_room_log_best_effort(
         shared_dir,
         room_id,
         "message_appended",
-        f"已写入来自 {from_agent} 的消息",
+        f"已写入来自 {from_agent} 的消息（{len(text or '')} 字符）",
         agent_id=from_agent,
-        meta={"kind": kind, "to": to_agent, "chars": len(text or "")},
+        meta={"kind": kind, "to": to_agent, "chars": len(text or ""), "preview": preview},
     )
     return record
 
@@ -305,8 +306,12 @@ def should_archive_room(active_file):
 
 def archive_room(shared_dir, room_id):
     active = room_active_file(shared_dir, room_id)
-    if not active.exists() or not parse_jsonl(active):
+    if not active.exists():
         return None
+    msgs = parse_jsonl(active)
+    if not msgs:
+        return None
+    msg_count = len(msgs)
     rdir = active.parent
     hdir = rdir / "history"
     hdir.mkdir(parents=True, exist_ok=True)
@@ -322,7 +327,7 @@ def archive_room(shared_dir, room_id):
     state["waiting_for"] = ""
     state["waiting_line"] = 0
     write_room_state(shared_dir, room_id, state)
-    _append_room_log_best_effort(shared_dir, room_id, "archived", f"已归档当前聊天记录到 {dest.name}")
+    _append_room_log_best_effort(shared_dir, room_id, "archived", f"已归档 {msg_count} 条消息到 {dest.name}", meta={"msg_count": msg_count})
     return dest.name
 
 
@@ -454,18 +459,24 @@ def tick_room(config, room_id, force=False):
         _log_tick(shared_dir, room_id, "delivery_blocked", f"无法唤醒 {agent_id}：该 Agent 未配置可自动调用的适配器", level="error", agent_id=agent_id, meta=cap)
         return {**result, "ok": False, "error": state["last_error"]}
 
+    msg_preview = text[:120].replace("\n", " ") if text else ""
     _log_tick(shared_dir, room_id, "delivery_attempt", f"准备唤醒/调用 {agent_id}，待投递消息 {len(pending)} 条", agent_id=agent_id, meta={
         "adapter": cap.get("type"),
         "from": context["from"],
         "new_msgs": len(pending),
+        "preview": msg_preview,
     })
+    import time as _time
+    _t0 = _time.monotonic()
     delivered, detail = deliver_to_adapter(agent_cfg, text, context["from"], context)
+    _elapsed = round(_time.monotonic() - _t0, 2)
     if not delivered:
         state["status"] = "error"
         state["last_error"] = detail
         write_room_state(shared_dir, room_id, state)
-        _log_tick(shared_dir, room_id, "delivery_failed", f"调用 {agent_id} 失败：{detail}", level="error", agent_id=agent_id, meta={
+        _log_tick(shared_dir, room_id, "delivery_failed", f"调用 {agent_id} 失败（{_elapsed}s）：{detail}", level="error", agent_id=agent_id, meta={
             "adapter": cap.get("type"),
+            "elapsed": _elapsed,
         })
         return {**result, "ok": False, "error": detail}
 
@@ -480,9 +491,10 @@ def tick_room(config, room_id, force=False):
     result["ok"] = True
     result["delivered"] = True
     result["waiting_for"] = agent_id
-    _log_tick(shared_dir, room_id, "delivery_succeeded", f"已成功唤醒/调用 {agent_id}：{detail}", agent_id=agent_id, meta={
+    _log_tick(shared_dir, room_id, "delivery_succeeded", f"已成功唤醒/调用 {agent_id}（{_elapsed}s）：{detail}", agent_id=agent_id, meta={
         "cursor": latest_line,
         "turn_count": state["turn_count"],
+        "elapsed": _elapsed,
     })
     return result
 
