@@ -380,6 +380,23 @@ def _extract_reply(body_text):
     return None
 
 
+def _sanitize_log_text(text):
+    """Remove sensitive patterns from log text (tokens, passwords, API keys)."""
+    if not text:
+        return text
+    import re as _re
+    # Bearer tokens
+    text = _re.sub(r'(Bearer\s+)\S+', r'\1***', text, flags=_re.IGNORECASE)
+    # Key-value patterns for sensitive fields
+    for field in ('token', 'password', 'secret', 'api_key', 'apikey', 'access_key', 'private_key'):
+        text = _re.sub(
+            rf'("{field}"\s*:\s*")([^"]{{1,8}})[^"]*"',
+            rf'\1\2***"',
+            text, flags=_re.IGNORECASE,
+        )
+    return text
+
+
 def _log_tick(shared_dir, room_id, event, message="", level="info", agent_id="", meta=None):
     _append_room_log_best_effort(shared_dir, room_id, event, message, level=level, agent_id=agent_id, meta=meta)
 
@@ -534,13 +551,16 @@ def tick_room(config, room_id, force=False):
     state["turn_count"] = int(state.get("turn_count", 0)) + 1
     state["last_error"] = ""
 
-    # Log response body for debugging (truncated)
-    if response_body and response_body.strip():
+    # Log response body for debugging (configurable, sanitized)
+    debug_cfg = config.get("debug", {})
+    if debug_cfg.get("log_adapter_response_body", False) and response_body and response_body.strip():
+        preview_chars = int(debug_cfg.get("response_body_preview_chars", 300))
+        preview = _sanitize_log_text(response_body[:preview_chars])
         _log_tick(shared_dir, room_id, "response_body", f"收到 {agent_id} 的响应体（{len(response_body)} 字符）", agent_id=agent_id, meta={
             "length": len(response_body),
-            "preview": response_body[:300].replace("\n", "\\n"),
+            "preview": preview.replace("\n", "\\n"),
         })
-    else:
+    elif debug_cfg.get("log_adapter_response_body", False):
         _log_tick(shared_dir, room_id, "response_body", f"{agent_id} 的响应体为空", agent_id=agent_id, meta={"length": 0})
 
     # Try to extract a synchronous reply from the adapter response

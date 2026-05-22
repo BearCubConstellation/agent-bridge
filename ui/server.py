@@ -28,7 +28,7 @@ from pathlib import Path
 # 从 core/ 导入
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
 from lock import file_lock
-from poll import do_archive, run_poll, load_config as load_poll_config, wakeup_agent
+from poll import do_archive, run_poll, load_config as load_poll_config, wakeup_agent, parse_jsonl
 from adapters import adapter_capability, adapter_to_wakeup, normalize_adapter, wakeup_to_adapter
 from rooms import (
     append_room_message,
@@ -43,6 +43,24 @@ from rooms import (
     tick_running_rooms,
     validate_room_id,
     write_room_state,
+    room_dir,
+    room_active_file,
+)
+# v2 modules
+from protocol import (
+    gen_message_id, gen_turn_id, gen_correlation_id,
+    make_message, migrate_room_state,
+    EVT_ROOM_STARTED, EVT_ROOM_PAUSED, EVT_MESSAGE_CREATED,
+    ROOM_RUNNING,
+)
+from events import emit_event, read_events
+from scheduler import get_scheduler
+from runtime import run_room_step, receive_agent_response
+from security import (
+    validate_room_id as security_validate_room_id,
+    validate_agent_id as security_validate_agent_id,
+    verify_callback_token, extract_token_from_request,
+    agent_in_room, sanitize_message,
 )
 
 
@@ -641,6 +659,10 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_room_messages(path)
         elif path.startswith("/api/rooms/") and path.endswith("/logs"):
             self.handle_room_logs(path)
+        elif path.startswith("/api/rooms/") and path.endswith("/events"):
+            self.handle_room_events(path)
+        elif path.startswith("/api/rooms/") and path.endswith("/turn"):
+            self.handle_room_current_turn(path)
         elif path.startswith("/api/history/"):
             self.handle_history(path)
         else:
@@ -1116,17 +1138,27 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
     # ─── POST /api/archive ─────────────────────────
 
     def _parse_room_api_path(self, path):
+        """Parse /api/rooms/{room_id}/{action} or /api/rooms/{room_id}/agents/{agent_id}/{action}."""
         parts = [p for p in path.split("/") if p]
-        if len(parts) != 4 or parts[0] != "api" or parts[1] != "rooms":
-            return None, None
-        room_id = parts[2]
-        action = parts[3]
-        if not validate_room_id(room_id):
-            return None, None
-        return room_id, action
+        # Standard: /api/rooms/{room_id}/{action}
+        if len(parts) == 4 and parts[0] == "api" and parts[1] == "rooms":
+            room_id = parts[2]
+            action = parts[3]
+            if not validate_room_id(room_id):
+                return None, None, None
+            return room_id, action, None
+        # Nested: /api/rooms/{room_id}/agents/{agent_id}/{action}
+        if len(parts) == 6 and parts[0] == "api" and parts[1] == "rooms" and parts[3] == "agents":
+            room_id = parts[2]
+            agent_id = parts[4]
+            action = parts[5]
+            if not validate_room_id(room_id) or not validate_agent_id(agent_id):
+                return None, None, None
+            return room_id, action, agent_id
+        return None, None, None
 
     def handle_room_messages(self, path):
-        room_id, action = self._parse_room_api_path(path)
+        room_id, action, _agent_id = self._parse_room_api_path(path)
         if action != "messages":
             self.send_error(404)
             return
@@ -1139,7 +1171,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json({"ok": True, "room_id": room_id, "count": len(messages), "messages": messages})
 
     def handle_room_logs(self, path):
-        room_id, action = self._parse_room_api_path(path)
+        room_id, action, _agent_id = self._parse_room_api_path(path)
         if action != "logs":
             self.send_error(404)
             return
@@ -1152,7 +1184,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json({"ok": True, "room_id": room_id, "count": len(logs), "logs": logs})
 
     def handle_room_action(self, path):
-        room_id, action = self._parse_room_api_path(path)
+        room_id, action, agent_id = self._parse_room_api_path(path)
         if not room_id:
             self.send_error(404)
             return
@@ -1169,6 +1201,17 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         room = normalize_room({**cfg["rooms"][room_id], "id": room_id})
+
+        # ── Agent callback: /api/rooms/{room_id}/agents/{agent_id}/callback ──
+        if action == "callback" and agent_id:
+            self._handle_agent_callback(cfg, shared, room_id, agent_id, body)
+            return
+
+        # ── Agent active message: /api/rooms/{room_id}/agents/{agent_id}/message ──
+        if action == "message" and agent_id:
+            self._handle_agent_message(cfg, shared, room_id, agent_id, body)
+            return
+
         if action == "send":
             agent_id = (body.get("agent_id") or body.get("from") or "user").strip()
             text = body.get("text", "")
@@ -1190,6 +1233,10 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({"ok": False, "error": "text required"})
                 return
             msg = append_room_message(shared, room_id, agent_id, text, to_agent=to_agent, kind=kind)
+            # v2: emit event + schedule room
+            emit_event(shared, room_id, EVT_MESSAGE_CREATED, actor=agent_id,
+                       message_id=msg.get("id", ""))
+            self._schedule_room(cfg, room_id)
             self.send_json({"ok": True, "room_id": room_id, "message": msg})
             return
 
@@ -1205,6 +1252,9 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             cfg["rooms"][room_id]["status"] = "running"
             write_bridge(config_path, cfg)
             append_room_log_safely(shared, room_id, "room_started", "聊天室已开始运行")
+            # v2: emit event + schedule room
+            emit_event(shared, room_id, EVT_ROOM_STARTED)
+            self._schedule_room(cfg, room_id)
             self.send_json({"ok": True, "room_id": room_id, "state": state})
             return
 
@@ -1213,15 +1263,150 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             cfg["rooms"][room_id]["status"] = "paused"
             write_bridge(config_path, cfg)
             append_room_log_safely(shared, room_id, "room_paused", "聊天室已暂停")
+            emit_event(shared, room_id, EVT_ROOM_PAUSED)
             self.send_json({"ok": True, "room_id": room_id, "state": state})
             return
 
         if action == "tick":
-            result = tick_room(cfg, room_id, force=bool(body.get("force", True)))
-            self.send_json({"ok": bool(result.get("ok")), "result": result})
+            # v2: use runtime state machine if scheduler is running
+            sched = get_scheduler()
+            if sched and sched.is_running:
+                result = run_room_step(cfg, room_id)
+            else:
+                result = tick_room(cfg, room_id, force=bool(body.get("force", True)))
+            self.send_json({"ok": bool(result.get("ok", True)), "result": result})
+            return
+
+        if action == "schedule":
+            # Manual schedule trigger
+            self._schedule_room(cfg, room_id)
+            self.send_json({"ok": True, "room_id": room_id, "scheduled": True})
             return
 
         self.send_error(404)
+
+    # ─── v2 Agent Callback ────────────────────────────
+
+    def _handle_agent_callback(self, cfg, shared, room_id, agent_id, body):
+        """Handle POST /api/rooms/{room_id}/agents/{agent_id}/callback"""
+        # Token auth
+        parsed = urllib.parse.urlparse(self.path)
+        params = dict(urllib.parse.parse_qsl(parsed.query))
+        token = extract_token_from_request(dict(self.headers), params)
+        ok, err = verify_callback_token(cfg, agent_id, token)
+        if not ok:
+            self.send_json({"ok": False, "error": f"auth failed: {err}"}, status=403)
+            return
+
+        # Validate membership
+        if not agent_in_room(cfg, room_id, agent_id):
+            self.send_json({"ok": False, "error": f"agent {agent_id} not in room {room_id}"}, status=403)
+            return
+
+        # Extract message
+        message = body.get("message", "")
+        turn_id = body.get("turn_id", "")
+        correlation_id = body.get("correlation_id", "")
+        meta = body.get("meta") or {}
+
+        try:
+            message = sanitize_message(message)
+        except ValueError as e:
+            self.send_json({"ok": False, "error": str(e)})
+            return
+
+        result = receive_agent_response(
+            shared, room_id, agent_id, message,
+            turn_id=turn_id, correlation_id=correlation_id,
+            source="callback", meta=meta,
+        )
+
+        status = 200 if result.get("ok") else 400
+        self.send_json(result, status=status)
+
+    def _handle_agent_message(self, cfg, shared, room_id, agent_id, body):
+        """Handle POST /api/rooms/{room_id}/agents/{agent_id}/message"""
+        # Token auth
+        parsed = urllib.parse.urlparse(self.path)
+        params = dict(urllib.parse.parse_qsl(parsed.query))
+        token = extract_token_from_request(dict(self.headers), params)
+        ok, err = verify_callback_token(cfg, agent_id, token)
+        if not ok:
+            self.send_json({"ok": False, "error": f"auth failed: {err}"}, status=403)
+            return
+
+        if not agent_in_room(cfg, room_id, agent_id):
+            self.send_json({"ok": False, "error": f"agent {agent_id} not in room {room_id}"}, status=403)
+            return
+
+        message = body.get("message", "")
+        mode = body.get("mode", "normal")
+        to_agent = body.get("to", "")
+        meta = body.get("meta") or {}
+
+        try:
+            message = sanitize_message(message)
+        except ValueError as e:
+            self.send_json({"ok": False, "error": str(e)})
+            return
+
+        msg = append_room_message(shared, room_id, agent_id, message,
+                                   to_agent=to_agent, kind="agent",
+                                   meta={"source": "active_push", "mode": mode, **meta})
+        emit_event(shared, room_id, EVT_MESSAGE_CREATED, actor=agent_id,
+                   message_id=msg.get("id", ""), meta={"source": "active_push", "mode": mode})
+        self._schedule_room(cfg, room_id)
+        self.send_json({"ok": True, "room_id": room_id, "agent_id": agent_id,
+                        "message_id": msg.get("id", ""), "message": msg})
+
+    def _schedule_room(self, cfg, room_id):
+        """Helper: schedule room via v2 scheduler if available."""
+        try:
+            sched = get_scheduler()
+            if sched:
+                if not sched._config:
+                    sched.set_config(cfg)
+                sched.schedule_room(room_id)
+        except Exception:
+            pass  # Scheduler not available — fall back to poll
+
+    # ─── v2 GET endpoints ─────────────────────────────
+
+    def handle_room_events(self, path):
+        """GET /api/rooms/{room_id}/events"""
+        room_id, action, _agent_id = self._parse_room_api_path(path)
+        if not room_id:
+            self.send_error(404)
+            return
+        shared = Path(self.shared_dir)
+        limit = 500
+        parsed = urllib.parse.urlparse(self.path)
+        params = dict(urllib.parse.parse_qsl(parsed.query))
+        if "limit" in params:
+            try:
+                limit = min(int(params["limit"]), 1000)
+            except ValueError:
+                pass
+        events = read_events(shared, room_id, limit=limit)
+        self.send_json({"ok": True, "room_id": room_id, "count": len(events), "events": events})
+
+    def handle_room_current_turn(self, path):
+        """GET /api/rooms/{room_id}/turn"""
+        room_id, action, _agent_id = self._parse_room_api_path(path)
+        if not room_id:
+            self.send_error(404)
+            return
+        shared = Path(self.shared_dir)
+        cfg, _ = read_bridge(shared)
+        if room_id not in cfg.get("rooms", {}):
+            self.send_json({"ok": False, "error": "room not found"})
+            return
+        room_cfg = normalize_room({**cfg["rooms"][room_id], "id": room_id})
+        state = read_room_state(shared, room_id, room_cfg)
+        state = migrate_room_state(state, room_cfg)
+        current_turn = state.get("current_turn")
+        self.send_json({"ok": True, "room_id": room_id, "current_turn": current_turn,
+                        "status": state.get("status"), "turn_index": state.get("turn_index")})
 
     def handle_archive(self):
         shared = Path(self.shared_dir)
