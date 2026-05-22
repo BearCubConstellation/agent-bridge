@@ -50,7 +50,7 @@ class TestRunPollReliability(unittest.TestCase):
             for i in range(60)
         ])
 
-        with mock.patch("poll.wakeup_agent", return_value=(True, "status=204")) as wakeup:
+        with mock.patch("poll.wakeup_agent", return_value=(True, "status=204", "")) as wakeup:
             result = run_poll(self._config())
 
         self.assertTrue(result["ok"])
@@ -68,7 +68,7 @@ class TestRunPollReliability(unittest.TestCase):
         ])
         (self.tmpdir / ".alice_ts_cursor").write_text(f"{ts}|1", encoding="utf-8")
 
-        with mock.patch("poll.wakeup_agent", return_value=(True, "status=204")) as wakeup:
+        with mock.patch("poll.wakeup_agent", return_value=(True, "status=204", "")) as wakeup:
             result = run_poll(self._config(cursor="timestamp"))
 
         self.assertTrue(result["ok"])
@@ -83,7 +83,7 @@ class TestRunPollReliability(unittest.TestCase):
             {"ts": "2025-01-01 00:00:02", "from": "carol", "msg": "from carol"},
         ])
 
-        with mock.patch("poll.wakeup_agent", return_value=(True, "status=204")) as wakeup:
+        with mock.patch("poll.wakeup_agent", return_value=(True, "status=204", "")) as wakeup:
             result = run_poll(self._config(filter_from=""))
 
         self.assertTrue(result["ok"])

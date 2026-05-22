@@ -70,7 +70,7 @@ class TestRoomRuntime(unittest.TestCase):
     def test_round_robin_waits_for_current_agent_reply_before_advancing(self):
         append_room_message(self.tmpdir, "room_dev", "user", "start", kind="user")
 
-        with mock.patch("rooms.deliver_to_adapter", return_value=(True, "ok")) as deliver:
+        with mock.patch("rooms.deliver_to_adapter", return_value=(True, "ok", "")) as deliver:
             first = tick_room(self.config, "room_dev", force=True)
             second = tick_room(self.config, "room_dev", force=True)
             append_room_message(self.tmpdir, "room_dev", "alice", "alice reply")

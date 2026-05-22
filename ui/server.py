@@ -1366,7 +1366,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json({"ok": False, "error": "Webhook URL not configured"})
             return
 
-        success, detail = wakeup_agent(wakeup, "[Agent Bridge] connectivity test", "agent-bridge")
+        success, detail, _body = wakeup_agent(wakeup, "[Agent Bridge] connectivity test", "agent-bridge")
         if success:
             self.send_json({"ok": True, "status": detail})
         else:

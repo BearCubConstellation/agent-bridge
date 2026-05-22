@@ -172,7 +172,9 @@ def _deliver_file_inbox(adapter, context):
 
 
 def deliver_to_adapter(agent_cfg, message_text, from_agent, context=None):
-    """Deliver message text to an agent through its configured adapter."""
+    """Deliver message text to an agent through its configured adapter.
+    Returns (success, detail, response_body).
+    """
     adapter = normalize_adapter(agent_cfg)
     context = dict(context or {})
     context.setdefault("message", message_text)
@@ -180,7 +182,7 @@ def deliver_to_adapter(agent_cfg, message_text, from_agent, context=None):
 
     adapter_type = adapter.get("type", "manual")
     if adapter_type == "manual":
-        return False, "manual adapter cannot be auto-triggered"
+        return False, "manual adapter cannot be auto-triggered", ""
 
     if adapter_type == "native_http":
         config = adapter.get("config", {})
@@ -196,9 +198,11 @@ def deliver_to_adapter(agent_cfg, message_text, from_agent, context=None):
         return wakeup_agent(wakeup_cfg, message_text, from_agent)
 
     if adapter_type in {"cli", "stdio_shim"}:
-        return _deliver_cli(adapter, context)
+        ok, detail = _deliver_cli(adapter, context)
+        return ok, detail, ""
 
     if adapter_type == "file_inbox":
-        return _deliver_file_inbox(adapter, context)
+        ok, detail = _deliver_file_inbox(adapter, context)
+        return ok, detail, ""
 
-    return False, f"unsupported adapter type: {adapter_type}"
+    return False, f"unsupported adapter type: {adapter_type}", ""

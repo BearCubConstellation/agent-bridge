@@ -202,7 +202,7 @@ class TestWakeupAgent(unittest.TestCase):
         thread = threading.Thread(target=server.handle_request)
         thread.start()
         try:
-            ok, msg = wakeup_agent({
+            ok, msg, body = wakeup_agent({
                 "url": f"http://127.0.0.1:{port}/hook",
                 "method": "PUT",
                 "body_template": {"message": "{{message}}"},

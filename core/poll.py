@@ -126,14 +126,14 @@ def read_cursor_state(cursor_file, cursor_type):
 def wakeup_agent(wakeup_cfg, message_text, from_agent):
     url = wakeup_cfg.get("url", "")
     if not url:
-        return (False, "wakeup URL is empty")
+        return (False, "wakeup URL is empty", "")
     if not url.startswith(("http://", "https://")):
-        return (False, f"unsupported URL scheme: {url}")
+        return (False, f"unsupported URL scheme: {url}", "")
 
     body = build_body(wakeup_cfg.get("body_template", {}), message_text, from_agent)
     method = wakeup_cfg.get("method", "POST").upper()
     if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
-        return (False, f"unsupported HTTP method: {method}")
+        return (False, f"unsupported HTTP method: {method}", "")
     headers = dict(wakeup_cfg.get("headers", {}))
     if method != "GET":
         headers.setdefault("Content-Type", "application/json")
@@ -159,11 +159,13 @@ def wakeup_agent(wakeup_cfg, message_text, from_agent):
 
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
-            return (True, f"status={resp.status}")
+            body = resp.read(65536).decode("utf-8", errors="replace")
+            return (True, f"status={resp.status}", body)
     except urllib.error.HTTPError as e:
-        return (False, f"HTTP {e.code}: {e.read().decode(errors='replace')[:100]}")
+        body = e.read().decode(errors="replace")[:200]
+        return (False, f"HTTP {e.code}: {body}", "")
     except Exception as e:
-        return (False, str(e))
+        return (False, str(e), "")
 
 
 def build_body(template, message_text, from_agent):
@@ -452,7 +454,7 @@ def run_poll(config):
 
     for attempt in range(1 + max_retries):
         attempts += 1
-        delivered, msg = wakeup_agent(wakeup_cfg, combined, source_agent)
+        delivered, msg, _body = wakeup_agent(wakeup_cfg, combined, source_agent)
         if delivered:
             break
         last_err = msg

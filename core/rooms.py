@@ -331,6 +331,55 @@ def archive_room(shared_dir, room_id):
     return dest.name
 
 
+def _extract_reply(body_text):
+    """Try to extract a reply message from an adapter response body.
+    Returns the reply string, or None if no recognizable reply.
+    """
+    if not body_text or not body_text.strip():
+        return None
+
+    text = body_text.strip()
+
+    # Try JSON parse
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            # MCP standard: {"content": [{"type": "text", "text": "..."}]}
+            content = data.get("content")
+            if isinstance(content, list) and content:
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        reply = item.get("text", "").strip()
+                        if len(reply) >= 5:
+                            return reply
+            # Simple result/content/message fields
+            for key in ("result", "reply", "response", "message", "content"):
+                val = data.get(key)
+                if isinstance(val, str) and len(val.strip()) >= 5:
+                    return val.strip()
+                if isinstance(val, dict):
+                    for inner_key in ("text", "content", "message"):
+                        inner = val.get(inner_key)
+                        if isinstance(inner, str) and len(inner.strip()) >= 5:
+                            return inner.strip()
+            # OpenAI-like: {"choices": [{"message": {"content": "..."}}]}
+            choices = data.get("choices")
+            if isinstance(choices, list) and choices:
+                msg = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+                c = msg.get("content", "")
+                if isinstance(c, str) and len(c.strip()) >= 5:
+                    return c.strip()
+        return None
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Plain text fallback — must be substantial and not look like JSON
+    if len(text) >= 20 and not text.startswith("{"):
+        return text
+
+    return None
+
+
 def _log_tick(shared_dir, room_id, event, message="", level="info", agent_id="", meta=None):
     _append_room_log_best_effort(shared_dir, room_id, event, message, level=level, agent_id=agent_id, meta=meta)
 
@@ -468,7 +517,7 @@ def tick_room(config, room_id, force=False):
     })
     import time as _time
     _t0 = _time.monotonic()
-    delivered, detail = deliver_to_adapter(agent_cfg, text, context["from"], context)
+    delivered, detail, response_body = deliver_to_adapter(agent_cfg, text, context["from"], context)
     _elapsed = round(_time.monotonic() - _t0, 2)
     if not delivered:
         state["status"] = "error"
@@ -482,11 +531,34 @@ def tick_room(config, room_id, force=False):
 
     latest_line = max(_line_no(m) for m in pending)
     write_room_cursor(shared_dir, room_id, agent_id, latest_line)
-    state["waiting_for"] = agent_id
-    # waiting_line 存的是当前消息总数，用于判断后续新消息（行号 > 此值）
-    state["waiting_line"] = len(messages)
     state["turn_count"] = int(state.get("turn_count", 0)) + 1
     state["last_error"] = ""
+
+    # Try to extract a synchronous reply from the adapter response
+    reply_text = _extract_reply(response_body)
+    if reply_text:
+        append_room_message(shared_dir, room_id, agent_id, reply_text)
+        # Advance turn immediately — no need to wait for next poll
+        next_index = (turn_index + 1) % len(order)
+        state["turn_index"] = next_index
+        state["round"] = int(state.get("round", 0)) + (1 if next_index == 0 else 0)
+        state["waiting_for"] = ""
+        state["waiting_line"] = 0
+        write_room_state(shared_dir, room_id, state)
+        result["ok"] = True
+        result["delivered"] = True
+        result["response_auto_written"] = True
+        _log_tick(shared_dir, room_id, "delivery_succeeded", f"已成功唤醒/调用 {agent_id}（{_elapsed}s）并收到同步回复", agent_id=agent_id, meta={
+            "cursor": latest_line,
+            "turn_count": state["turn_count"],
+            "elapsed": _elapsed,
+            "reply_length": len(reply_text),
+        })
+        return result
+
+    # No reply captured — fall back to waiting mechanism
+    state["waiting_for"] = agent_id
+    state["waiting_line"] = len(messages)
     write_room_state(shared_dir, room_id, state)
     result["ok"] = True
     result["delivered"] = True
