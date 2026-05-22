@@ -743,6 +743,32 @@ body {
   animation: roomRunningDot 1.4s ease-in-out infinite;
   pointer-events: none;
 }
+.room-card.active .room-agent-slot.occupied {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--green) 28%, var(--border));
+  background:
+    linear-gradient(120deg, color-mix(in srgb, var(--green) 12%, var(--surface2)) 0%, var(--surface2) 42%, color-mix(in srgb, var(--green) 18%, var(--surface3)) 50%, var(--surface2) 58%, color-mix(in srgb, var(--green) 12%, var(--surface2)) 100%);
+  background-size: 220% 100%;
+  animation: roomAgentGlow 2.8s linear infinite;
+}
+.room-card.active .room-agent-slot.occupied::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  border: 1px solid rgba(91, 154, 74, 0.12);
+  pointer-events: none;
+}
+.room-card.active .room-agent-slot.occupied .agent-chip {
+  position: relative;
+  z-index: 1;
+  color: var(--text);
+}
+.room-card.active .room-agent-slot.occupied .agent-chip .dot {
+  box-shadow: 0 0 0 0 rgba(91, 154, 74, 0.38);
+  animation: roomAgentDot 1.8s ease-in-out infinite;
+}
 .room-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-md); }
 .room-card-main { min-width: 0; flex: 1; }
 .room-card-name {
@@ -878,24 +904,79 @@ body {
   background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--surface);
   border: 2px dashed var(--border);
   border-radius: var(--radius-lg);
-  display: flex; align-items: center; justify-content: space-between;
-  gap: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   padding: var(--space-lg);
-  cursor: pointer; color: var(--text3);
+  color: var(--text3);
   transition: all var(--transition), transform var(--transition-fast);
+  position: relative;
+  overflow: hidden;
 }
-.room-card-add:hover { border-color: var(--accent); color: var(--accent); background: rgba(233,69,96,0.05); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.room-card-add::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top right, rgba(91,154,74,0.12), transparent 42%),
+    radial-gradient(circle at bottom left, rgba(233,69,96,0.08), transparent 36%);
+  pointer-events: none;
+}
+.room-card-add:hover { border-color: var(--accent); color: var(--text); background: color-mix(in srgb, var(--surface2) 78%, var(--bg)); transform: translateY(-2px); box-shadow: var(--shadow-md); }
 .room-card-add:active { transform: scale(0.96); }
+.room-card-add-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+  z-index: 1;
+}
 .room-card-add .add-icon {
-  width: 44px; height: 44px; flex-shrink: 0;
+  width: 42px; height: 42px; flex-shrink: 0;
   display: grid; place-items: center;
-  border-radius: 50%; background: var(--surface2);
-  font-size: 1.7em; line-height: 1;
-  transition: transform var(--transition), background var(--transition);
+  border-radius: 14px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, var(--surface2)), var(--surface2));
+  color: var(--accent);
+  font-size: 1.35em; line-height: 1;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  transition: transform var(--transition), background var(--transition), border-color var(--transition);
 }
 .room-card-add:hover .add-icon { transform: scale(1.1); }
-.room-card-add .add-label { font-size: var(--font-base); font-weight: 600; }
+.room-card-add .add-label { font-size: var(--font-base); font-weight: 700; color: var(--text); }
 .room-card-add .add-desc { font-size: 0.74em; color: var(--text3); margin-top: 4px; }
+.room-card-add-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+  z-index: 1;
+}
+.room-card-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.room-card-add-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 0.86em;
+  padding: 10px 12px;
+  line-height: 1.2;
+}
+.room-card-add-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  box-shadow: 0 0 0 3px rgba(91,154,74,0.08);
+}
+.room-card-add-submit {
+  white-space: nowrap;
+  min-width: 84px;
+}
 
 /* ═══ Room Delete Button ═══ */
 .room-del-btn {
@@ -940,6 +1021,16 @@ body {
 @keyframes roomRunningDot {
   0%, 100% { transform: scale(0.85); box-shadow: 0 0 0 0 rgba(78,205,196,0.42); }
   50% { transform: scale(1); box-shadow: 0 0 0 8px rgba(78,205,196,0); }
+}
+
+@keyframes roomAgentGlow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+@keyframes roomAgentDot {
+  0%, 100% { transform: scale(0.9); }
+  50% { transform: scale(1.15); }
 }
 
 /* ═══ Agent Source Panel (Drag) ═══ */
@@ -1425,6 +1516,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   .settings-row label { min-width: 100%; }
   .msg-bubble { max-width: 94%; }
   .room-card-add { aspect-ratio: auto; min-height: 120px; }
+  .room-card-add-row { flex-direction: column; align-items: stretch; }
+  .room-card-add-submit { width: 100%; }
   .modal, .test-modal { margin: 0 12px; padding: var(--space-xl); }
 }
 
@@ -1816,8 +1909,10 @@ body {
 }
 
 .room-card-add:hover {
-  background: var(--surface2);
+  background: color-mix(in srgb, var(--surface2) 78%, var(--bg));
   color: var(--text);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 
 .room-card.active {
@@ -1866,15 +1961,67 @@ body {
   aspect-ratio: auto;
   color: var(--text3);
   border-style: dashed;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+.room-card-add::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top right, rgba(91,154,74,0.12), transparent 42%),
+    radial-gradient(circle at bottom left, rgba(233,69,96,0.08), transparent 36%);
+  pointer-events: none;
 }
 
 .room-card-add .add-icon {
-  width: 26px;
-  height: 26px;
-  border-radius: var(--radius-sm);
-  background: transparent;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, var(--surface2)), var(--surface2));
   color: var(--accent);
-  font-size: 1.2rem;
+  font-size: 1.35rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+}
+
+.room-card-add-top,
+.room-card-add-body {
+  position: relative;
+  z-index: 1;
+}
+
+.room-card-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.room-card-add-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 0.86em;
+  padding: 10px 12px;
+  line-height: 1.2;
+}
+
+.room-card-add-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  box-shadow: 0 0 0 3px rgba(91,154,74,0.08);
+}
+
+.room-card-add-submit {
+  white-space: nowrap;
+  min-width: 84px;
 }
 
 .room-del-btn,
@@ -3112,13 +3259,25 @@ function renderRoomGrid(options = {}) {
   }
 
   // Add room card (square)
-  html += `<div class="room-card-add" onclick="addRoom()">
-    <div class="add-icon">+</div>
-    <div class="add-label">新增聊天室</div>
+  html += `<div class="room-card-add" data-add-room-card>
+    <div class="room-card-add-top">
+      <div class="add-icon">+</div>
+      <div>
+        <div class="add-label">新增聊天室</div>
+        <div class="add-desc">输入名称后直接创建</div>
+      </div>
+    </div>
+    <div class="room-card-add-body">
+      <div class="room-card-add-row">
+        <input type="text" class="room-card-add-input" placeholder="聊天室名称" maxlength="40" />
+        <button type="button" class="room-card-action primary room-card-add-submit">创建</button>
+      </div>
+    </div>
   </div>`;
 
   grid.innerHTML = html;
   setupDragAndDrop();
+  setupRoomAddCard();
   if (animate) {
     // Only play the entrance animation on the initial render.
     const cards = grid.querySelectorAll('.room-card, .room-card-add');
@@ -3219,54 +3378,48 @@ async function assignAgentToRoom(roomId, slotIndex, agentId) {
   }
 }
 
-function addRoom() {
-  const overlay = document.createElement('div');
-  overlay.className = 'test-modal-overlay';
-  overlay.innerHTML = `<div class="test-modal" style="text-align:left;padding:24px 28px">
-    <div style="font-size:1em;font-weight:600;color:var(--text);margin-bottom:16px">新增聊天室</div>
-    <div class="wakeup-field">
-      <label>聊天室名称</label>
-      <input type="text" class="room-name-input" placeholder="输入名称…" style="font-size:0.9em;padding:8px 10px" autofocus />
-    </div>
-    <div class="test-modal-actions" style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px;margin-bottom:0">
-      <button class="test-modal-close" id="addRoomCancel">取消</button>
-      <button class="save-btn" id="addRoomConfirm" style="padding:6px 20px;font-size:0.82em">创建</button>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
+function setupRoomAddCard() {
+  const card = document.querySelector('[data-add-room-card]');
+  if (!card) return;
+  const input = card.querySelector('.room-card-add-input');
+  const submit = card.querySelector('.room-card-add-submit');
+  if (!input || !submit) return;
+  const create = () => createRoomFromAddCard(card);
+  input.onkeydown = e => {
+    if (e.key === 'Enter') create();
+  };
+  submit.onclick = create;
+}
 
-  const input = overlay.querySelector('.room-name-input');
-  const confirmBtn = overlay.querySelector('#addRoomConfirm');
-  const cancelBtn = overlay.querySelector('#addRoomCancel');
-
-  const close = () => overlay.remove();
-
-  input.focus();
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter') confirmBtn.click();
-    if (e.key === 'Escape') close();
-  });
-  confirmBtn.addEventListener('click', async () => {
-    const name = input.value.trim();
-    if (!name) {
-      input.classList.add('field-error');
-      input.focus();
-      return;
-    }
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = '创建中…';
-    const result = await apiPost('/api/rooms', { name, agents: [] });
-    if (result && result.ok) {
-      close();
-      loadRooms();
-    } else {
-      confirmBtn.disabled = false;
-      confirmBtn.textContent = '创建';
-      toast(result?.error || '创建失败', 'error');
-    }
-  });
-  cancelBtn.addEventListener('click', close);
-  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+async function createRoomFromAddCard(card) {
+  const input = card?.querySelector('.room-card-add-input');
+  const submit = card?.querySelector('.room-card-add-submit');
+  if (!input || !submit) return;
+  const name = input.value.trim();
+  if (!name) {
+    input.classList.add('field-error');
+    input.focus();
+    toast('请输入聊天室名称', 'warning');
+    return;
+  }
+  input.classList.remove('field-error');
+  submit.disabled = true;
+  const oldText = submit.textContent;
+  submit.textContent = '创建中…';
+  const result = await apiPost('/api/rooms', { name, agents: [] });
+  if (result && result.ok) {
+    input.value = '';
+    toast('聊天室已创建', 'ok');
+    await loadRooms();
+    requestAnimationFrame(() => {
+      const nextInput = document.querySelector('[data-add-room-card] .room-card-add-input');
+      if (nextInput) nextInput.focus();
+    });
+  } else {
+    toast(result?.error || '创建失败', 'error');
+  }
+  submit.disabled = false;
+  submit.textContent = oldText || '创建';
 }
 
 async function deleteRoom(roomId) {
