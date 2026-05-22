@@ -1171,20 +1171,22 @@ body {
   display: flex; align-items: center; gap: 6px; flex-shrink: 0;
 }
 .agent-card-save-btn {
-  padding: 5px 10px;
-  font-size: 0.72em;
-  line-height: 1.2;
+  min-width: 72px;
 }
 .agent-config .del-btn {
-  padding: 5px 10px;
+  min-width: 72px;
+}
+.agent-card-save-btn,
+.agent-config .del-btn {
+  height: 28px;
+  padding: 0 12px;
   font-size: 0.72em;
-  line-height: 1.2;
+  line-height: 1;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface2);
-  color: var(--text2);
-  cursor: pointer;
-  transition: all var(--transition), transform var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
 .agent-config .del-btn:hover {
   color: var(--red);
@@ -4182,7 +4184,7 @@ function renderAgentConfig(data, area) {
           <span class="agent-display-label">${esc(a.display_name || a.id)}</span>
         </div>
         <div class="agent-card-actions">
-          <button class="save-btn agent-card-save-btn" onclick="saveAgentCard(this)">保存配置</button>
+          <button class="save-btn agent-card-save-btn" onclick="saveAgentCard(this)">保存</button>
           <button class="del-btn" onclick="removeAgent(this)">删除</button>
         </div>
       </div>
@@ -4271,7 +4273,7 @@ function addAgent() {
       <span class="agent-display-label">新 Agent</span>
     </div>
     <div class="agent-card-actions">
-      <button class="save-btn agent-card-save-btn" onclick="saveAgentCard(this)">保存配置</button>
+      <button class="save-btn agent-card-save-btn" onclick="saveAgentCard(this)">保存</button>
       <button class="del-btn" onclick="removeAgent(this)">删除</button>
     </div>
   </div>
