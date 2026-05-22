@@ -15,7 +15,8 @@ from lock import file_lock
 from poll import wakeup_agent
 
 
-ADAPTER_TYPES = {"native_http", "cli", "stdio_shim", "file_inbox", "manual"}
+ADAPTER_TYPES = {"native_http", "cli", "stdio_shim", "file_inbox", "manual",
+               "openclaw_sessions", "mcp_tool", "file_mailbox"}
 
 
 def render_template(value, context):
@@ -75,8 +76,16 @@ def normalize_adapter(agent_cfg):
         return wakeup_to_adapter(agent_cfg.get("wakeup") or {})
 
     adapter_type = adapter.get("type", "manual")
-    if adapter_type not in ADAPTER_TYPES:
-        adapter_type = "manual"
+    # Check v2 registry first, then legacy set
+    try:
+        from adapters.base import get_adapter_class
+        if get_adapter_class(adapter_type):
+            pass  # Known v2 adapter type, keep it
+        elif adapter_type not in ADAPTER_TYPES:
+            adapter_type = "manual"
+    except ImportError:
+        if adapter_type not in ADAPTER_TYPES:
+            adapter_type = "manual"
     adapter["type"] = adapter_type
     adapter.setdefault("config", {})
     adapter.setdefault("auth", {})
@@ -87,6 +96,20 @@ def normalize_adapter(agent_cfg):
 def adapter_capability(agent_cfg):
     adapter = normalize_adapter(agent_cfg)
     adapter_type = adapter.get("type", "manual")
+
+    # Delegate to v2 adapter class if registered
+    try:
+        from adapters.base import get_adapter_class
+        cls = get_adapter_class(adapter_type)
+        if cls:
+            cap = cls().capability(agent_cfg)
+            # Merge legacy fields for backward compat
+            cap.setdefault("automatic", cap.get("automatic", True))
+            cap.setdefault("configured", cap.get("configured", True))
+            return cap
+    except (ImportError, Exception):
+        pass
+
     config = adapter.get("config", {})
     automatic = adapter_type not in {"manual"}
     configured = True

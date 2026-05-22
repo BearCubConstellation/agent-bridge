@@ -88,10 +88,9 @@ class OpenClawSessionsAdapter(BaseAdapter):
         # Build sessions_send tool format payload
         rendered = render_template(message_template, context) if message_template else {}
 
-        # Construct the OpenClaw tool call payload
-        payload_body = {
-            "tool": "sessions_send",
-            "sessionsKey": sessions_key,
+        # Construct the OpenClaw /tools/invoke payload with args wrapper
+        args_payload = {
+            "sessionKey": sessions_key,
             "turn_id": turn_id,
             "correlation_id": correlation_id,
             "callback_url": callback_url,
@@ -99,9 +98,14 @@ class OpenClawSessionsAdapter(BaseAdapter):
             "from": from_agents,
             "room_id": room_id,
         }
-        # Merge rendered template fields
+        # Merge rendered template fields into args
         if isinstance(rendered, dict):
-            payload_body.update(rendered)
+            args_payload.update(rendered)
+
+        payload_body = {
+            "tool": "sessions_send",
+            "args": args_payload,
+        }
 
         if not url:
             return make_delivery_ticket(

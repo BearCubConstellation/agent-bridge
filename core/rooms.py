@@ -168,7 +168,7 @@ def _message_id():
     return "msg_" + datetime.now().strftime("%Y%m%d%H%M%S%f")
 
 
-def append_room_message(shared_dir, room_id, from_agent, text, to_agent="", kind="agent", meta=None):
+def append_room_message(shared_dir, room_id, from_agent, text, to_agent="", kind="agent", meta=None, reply_to="", correlation_id=""):
     active = room_active_file(shared_dir, room_id)
     active.parent.mkdir(parents=True, exist_ok=True)
     record = {
@@ -184,6 +184,10 @@ def append_room_message(shared_dir, room_id, from_agent, text, to_agent="", kind
         record["kind"] = kind
     if meta:
         record["meta"] = meta
+    if reply_to:
+        record["reply_to"] = reply_to
+    if correlation_id:
+        record["correlation_id"] = correlation_id
     with file_lock(active.parent / ".active.lock"):
         with open(active, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")

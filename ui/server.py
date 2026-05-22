@@ -610,6 +610,15 @@ class PollManager:
             result = {"ok": False, "new_msgs": 0, "delivered": False,
                       "archived": None, "error": str(e), "to_agent": "", "from_agent": ""}
 
+        # V2: scan running rooms into scheduler as fallback
+        try:
+            sched = get_scheduler()
+            if sched and sched.is_running:
+                sched.set_config(config)
+                sched.scan_running_rooms(config)
+        except Exception:
+            pass
+
         with self._lock:
             self.last_result = result
             self.last_run = now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1685,9 +1694,9 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         except json.JSONDecodeError:
             return None, {"ok": False, "error": "invalid JSON"}
 
-    def send_json(self, data):
+    def send_json(self, data, status=200):
         text = json.dumps(data, ensure_ascii=False)
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         # 动态回显请求 Origin，仅允许可信的 localhost 来源
@@ -1736,6 +1745,13 @@ def main():
     if not args.no_poll:
         poll_mgr.start()
 
+    # 初始化 V2 Scheduler
+    sched = get_scheduler()
+    cfg, cfg_path = read_bridge(Path(shared_dir))
+    sched.set_config(cfg)
+    sched.start()
+    sched.scan_running_rooms(cfg)
+
     try:
         server = http.server.HTTPServer((args.host, args.port), BridgeHandler)
     except OSError as e:
@@ -1762,6 +1778,7 @@ def main():
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nStopping...")
+        sched.stop()
         poll_mgr.stop()
         server.server_close()
 
