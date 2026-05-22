@@ -1176,11 +1176,23 @@ body {
   line-height: 1.2;
 }
 .agent-config .del-btn {
-  background: none; border: 1px solid transparent; color: var(--text3);
-  padding: 2px 7px; border-radius: var(--radius-sm); cursor: pointer;
-  font-size: 0.7em; transition: all var(--transition);
+  padding: 5px 10px;
+  font-size: 0.72em;
+  line-height: 1.2;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text2);
+  cursor: pointer;
+  transition: all var(--transition), transform var(--transition-fast);
 }
-.agent-config .del-btn:hover { color: var(--red); border-color: var(--border); background: rgba(255,107,107,0.08); }
+.agent-config .del-btn:hover {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 36%, var(--border));
+  background: color-mix(in srgb, var(--red) 10%, var(--surface2));
+  transform: translateY(-1px);
+}
+.agent-config .del-btn:active { transform: scale(0.97); }
 .agent-card-status {
   display: block;
   min-height: 1.25em;
@@ -2668,6 +2680,12 @@ function randomAgentColor() {
   return AGENT_COLOR_POOL[Math.floor(Math.random() * AGENT_COLOR_POOL.length)];
 }
 
+function refreshAgentCount() {
+  const count = document.querySelectorAll('.agent-config-grid .agent-config').length;
+  const el = $('.agent-page-count');
+  if (el) el.textContent = `${count} 个 Agent`;
+}
+
 function formatScanTime(value) {
   if (!value) return '';
   const d = new Date(value);
@@ -2745,11 +2763,12 @@ function renderBadges() {
   if (!container) return;
   container.innerHTML = '';
   for (const a of state.agents) {
-    const el = document.createElement('div');
-    el.className = 'agent-badge'; el.dataset.agentId = a.id;
-    el.innerHTML = `<span class="agent-dot" style="background:${a.color}"></span><span>${esc(a.display_name||a.id)}</span>${a.sample ? '<span class="discover-pill sample">示例</span>' : ''}`;
-    container.appendChild(el);
+  const el = document.createElement('div');
+  el.className = 'agent-badge'; el.dataset.agentId = a.id;
+  el.innerHTML = `<span class="agent-dot" style="background:${a.color}"></span><span>${esc(a.display_name||a.id)}</span>${a.sample ? '<span class="discover-pill sample">示例</span>' : ''}`;
+  container.appendChild(el);
   }
+  refreshAgentCount();
 }
 
 function updateScanNote(scannedAt) {
@@ -4164,7 +4183,7 @@ function renderAgentConfig(data, area) {
         </div>
         <div class="agent-card-actions">
           <button class="save-btn agent-card-save-btn" onclick="saveAgentCard(this)">保存配置</button>
-          <button class="del-btn" onclick="removeAgent(this)" title="删除此 Agent">🗑</button>
+          <button class="del-btn" onclick="removeAgent(this)">删除</button>
         </div>
       </div>
       ${renderAgentBaseFields(a)}
@@ -4253,7 +4272,7 @@ function addAgent() {
     </div>
     <div class="agent-card-actions">
       <button class="save-btn agent-card-save-btn" onclick="saveAgentCard(this)">保存配置</button>
-      <button class="del-btn" onclick="removeAgent(this)" title="删除此 Agent">🗑</button>
+      <button class="del-btn" onclick="removeAgent(this)">删除</button>
     </div>
   </div>
   ${renderAgentBaseFields({color})}
@@ -4262,6 +4281,7 @@ function addAgent() {
   
   const grid = container.querySelector('.agent-config-grid');
   if (grid) grid.appendChild(card);
+  refreshAgentCount();
   card.scrollIntoView({behavior:'smooth', block:'center'});
 }
 
@@ -4288,6 +4308,7 @@ async function removeAgent(btn) {
   });
   if (!ok) return;
   card.remove();
+  refreshAgentCount();
   const status = $('#saveStatus');
   const result = await saveVisibleAgentConfig(status);
   if (result.ok) {
