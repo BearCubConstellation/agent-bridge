@@ -222,12 +222,11 @@ body {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: var(--font-sm); padding: 4px 11px;
   background: var(--surface2); border-radius: var(--radius-pill);
-  border: 1px solid var(--border); cursor: pointer;
+  border: 1px solid var(--border);
   transition: all var(--transition), transform var(--transition-fast);
   position: relative; user-select: none;
 }
-.agent-badge:hover { border-color: var(--border-hover); background: var(--surface3); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
-.agent-badge:active { transform: scale(0.96); }
+.agent-badge:hover { border-color: var(--border-hover); background: var(--surface3); box-shadow: var(--shadow-sm); }
 .agent-badge.editing { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
 .agent-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 
@@ -1159,19 +1158,38 @@ body {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 7px; padding-bottom: 6px;
   border-bottom: 1px solid var(--border);
+  gap: var(--space-sm);
 }
 .agent-config-name {
   font-weight: 600; font-size: 0.82em;
   display: flex; align-items: center; gap: 6px;
+  min-width: 0;
 }
 .agent-config-name .dot { width: 8px; height: 8px; border-radius: 50%; }
 .agent-config-icon { font-size: 1.1em; flex-shrink: 0; }
+.agent-card-actions {
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+}
+.agent-card-save-btn {
+  padding: 5px 10px;
+  font-size: 0.72em;
+  line-height: 1.2;
+}
 .agent-config .del-btn {
   background: none; border: 1px solid transparent; color: var(--text3);
   padding: 2px 7px; border-radius: var(--radius-sm); cursor: pointer;
   font-size: 0.7em; transition: all var(--transition);
 }
 .agent-config .del-btn:hover { color: var(--red); border-color: var(--border); background: rgba(255,107,107,0.08); }
+.agent-card-status {
+  display: block;
+  min-height: 1.25em;
+  margin-top: 8px;
+  font-size: 0.76em;
+  color: var(--text3);
+}
+.agent-card-status.ok { color: var(--green); }
+.agent-card-status.error { color: var(--red); }
 
 /* ═══ Form Grid (Agent Config) ═══ */
 .form-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-xs); }
@@ -2519,6 +2537,7 @@ pre,
 
 const VALID_ID_RE = /^[a-zA-Z0-9_-]+$/;
 const DISCOVER_CACHE_KEY = 'agentBridgeDiscoveredAgents';
+const AGENT_COLOR_POOL = ['#5b9a4a', '#d97706', '#2563eb', '#be123c', '#7c3aed', '#0f766e', '#c2410c', '#4f46e5'];
 
 let state = {
   messages: [], roomLogs: [], agents: [], agentIds: [], agentMap: {}, agentAlias: {},
@@ -2645,6 +2664,10 @@ function writeDiscoverCache(agents) {
   return cache;
 }
 
+function randomAgentColor() {
+  return AGENT_COLOR_POOL[Math.floor(Math.random() * AGENT_COLOR_POOL.length)];
+}
+
 function formatScanTime(value) {
   if (!value) return '';
   const d = new Date(value);
@@ -2725,7 +2748,6 @@ function renderBadges() {
     const el = document.createElement('div');
     el.className = 'agent-badge'; el.dataset.agentId = a.id;
     el.innerHTML = `<span class="agent-dot" style="background:${a.color}"></span><span>${esc(a.display_name||a.id)}</span>${a.sample ? '<span class="discover-pill sample">示例</span>' : ''}`;
-    el.addEventListener('click', e => { e.stopPropagation(); openEditPopup(el, a); });
     container.appendChild(el);
   }
 }
@@ -2849,6 +2871,8 @@ function populateAgentCard(card, agent) {
   if (picker && /^#[0-9a-fA-F]{6}$/.test(color)) picker.value = color;
   const dot = card.querySelector('.agent-config-name .dot');
   if (dot) dot.style.background = color;
+  const label = card.querySelector('.agent-display-label');
+  if (label) label.textContent = agent.display_name || agent.id || '新 Agent';
   updateAgentTokenPlaceholders(card);
   const cursor = card.querySelector('.ag-cursor');
   if (cursor) cursor.value = agent.cursor || 'line';
@@ -2902,10 +2926,10 @@ function addDiscoveredAgent(index) {
   addAgent();
   const cards = grid.querySelectorAll('.agent-config');
   const card = cards[cards.length - 1];
-  populateAgentCard(card, agent);
+  populateAgentCard(card, {...agent, color: agent.color && agent.color !== '#8888a0' ? agent.color : randomAgentColor()});
   const status = $('#saveStatus');
   if (status) {
-    status.textContent = '已添加到表单，保存配置后生效';
+    status.textContent = '已添加到表单，请在该 Agent 卡片中保存配置';
     status.className = 'save-status ok';
   }
 }
@@ -4136,12 +4160,16 @@ function renderAgentConfig(data, area) {
         <div class="agent-config-name">
           <span class="agent-config-icon">🤖</span>
           <span class="dot" style="background:${color}"></span>
-          ${esc(a.display_name || a.id)}
+          <span class="agent-display-label">${esc(a.display_name || a.id)}</span>
         </div>
-        <button class="del-btn" onclick="removeAgent(this)" title="删除此 Agent">🗑</button>
+        <div class="agent-card-actions">
+          <button class="save-btn agent-card-save-btn" onclick="saveAgentCard(this)">保存配置</button>
+          <button class="del-btn" onclick="removeAgent(this)" title="删除此 Agent">🗑</button>
+        </div>
       </div>
       ${renderAgentBaseFields(a)}
       ${renderAgentAdvancedHtml(a, i)}
+      <span class="agent-card-status"></span>
     </div>`;
   }
 
@@ -4165,7 +4193,6 @@ function renderAgentConfig(data, area) {
       <div class="agent-config-grid">${agentHtml}</div>
       <div class="settings-actions">
         <button class="add-agent-btn" onclick="addAgent()">＋ 添加 Agent</button>
-        <button class="save-btn" onclick="saveFullConfig()">💾 保存配置</button>
         <span class="save-status" id="saveStatus"></span>
       </div>
     </div>
@@ -4217,16 +4244,21 @@ function addAgent() {
   const card = document.createElement('div');
   card.className = 'agent-config';
   card.dataset.agentIdx = idx;
+  const color = randomAgentColor();
   card.innerHTML = `<div class="agent-config-header">
     <div class="agent-config-name">
       <span class="agent-config-icon">🤖</span>
-      <span class="dot" style="background:#8888a0"></span>
-      新 Agent
+      <span class="dot" style="background:${color}"></span>
+      <span class="agent-display-label">新 Agent</span>
     </div>
-    <button class="del-btn" onclick="removeAgent(this)" title="删除此 Agent">🗑</button>
+    <div class="agent-card-actions">
+      <button class="save-btn agent-card-save-btn" onclick="saveAgentCard(this)">保存配置</button>
+      <button class="del-btn" onclick="removeAgent(this)" title="删除此 Agent">🗑</button>
+    </div>
   </div>
-  ${renderAgentBaseFields({color:'#8888a0'})}
-  ${renderAgentAdvancedHtml({color:'#8888a0', cursor:'line'}, idx)}`;
+  ${renderAgentBaseFields({color})}
+  ${renderAgentAdvancedHtml({color, cursor:'line'}, idx)}
+  <span class="agent-card-status"></span>`;
   
   const grid = container.querySelector('.agent-config-grid');
   if (grid) grid.appendChild(card);
@@ -4256,33 +4288,67 @@ async function removeAgent(btn) {
   });
   if (!ok) return;
   card.remove();
+  const status = $('#saveStatus');
+  const result = await saveVisibleAgentConfig(status);
+  if (result.ok) {
+    if (status) {
+      status.textContent = 'Agent 已删除';
+      status.className = 'save-status ok';
+      setTimeout(() => { status.textContent = ''; }, 2500);
+    }
+    await loadConfig();
+    renderCachedDiscover();
+  }
 }
 
-async function saveFullConfig() {
-  const status = $('#saveStatus');
-  status.textContent = '保存中…';
-  status.className = 'save-status';
-  
+function setAgentCardStatus(card, msg, type) {
+  const status = card?.querySelector('.agent-card-status');
+  if (!status) return;
+  status.textContent = msg;
+  status.className = 'agent-card-status' + (type ? ` ${type}` : '');
+}
+
+function validateAgentData(data) {
+  if (!data.id) return 'Agent ID 不能为空';
+  if (!VALID_ID_RE.test(data.id)) return `无效 ID: ${data.id}`;
+  if (!/^#[0-9a-fA-F]{6}$/.test(data.color)) return `颜色格式错误: ${data.id}`;
+  return '';
+}
+
+function collectVisibleAgentData() {
   const area = $('#agentArea');
   const container = area.querySelector('.settings-panel');
-  if (!container) { status.textContent = '表单未加载'; status.className = 'save-status error'; return; }
+  if (!container) return {agents: [], errors: ['表单未加载']};
 
   const agentCards = container.querySelectorAll('.agent-config-grid .agent-config');
   const agents = [];
   const errors = [];
+  const ids = new Set();
   
   for (const card of agentCards) {
     const data = collectAgentData(card);
-    if (!data.id) { errors.push('Agent ID 不能为空'); continue; }
-    if (!/^[a-zA-Z0-9_-]+$/.test(data.id)) { errors.push(`无效 ID: ${data.id}`); continue; }
-    if (!/^#[0-9a-fA-F]{6}$/.test(data.color)) { errors.push(`颜色格式错误: ${data.id}`); continue; }
+    const error = validateAgentData(data);
+    if (error) { errors.push(error); continue; }
+    if (ids.has(data.id)) { errors.push(`Agent ID 重复: ${data.id}`); continue; }
+    ids.add(data.id);
     agents.push(data);
   }
+  return {agents, errors};
+}
+
+async function saveVisibleAgentConfig(status) {
+  if (status) {
+    status.textContent = '保存中…';
+    status.className = 'save-status';
+  }
+  const {agents, errors} = collectVisibleAgentData();
   
   if (errors.length) {
-    status.textContent = errors.join('; ');
-    status.className = 'save-status error';
-    return;
+    if (status) {
+      status.textContent = errors.join('; ');
+      status.className = 'save-status error';
+    }
+    return {ok: false, error: errors.join('; ')};
   }
   
   const agentId = ( $('#settingsAgentId') || {} ).value;
@@ -4291,16 +4357,72 @@ async function saveFullConfig() {
     agents: agents,
     agent_id: agentId,
   });
-  
-  if (r && r.ok) {
-    status.textContent = '✓ 配置已保存';
-    status.className = 'save-status ok';
-    await loadConfig(); // Refresh badges and cards
+  if (!r || !r.ok) {
+    const error = r?.error || '服务器错误';
+    if (status) {
+      status.textContent = '保存失败: ' + error;
+      status.className = 'save-status error';
+    }
+    return {ok: false, error};
+  }
+  return {ok: true};
+}
+
+function buildAgentPayloadForCard(card) {
+  const data = collectAgentData(card);
+  const error = validateAgentData(data);
+  if (error) return {error};
+  const sameIdCard = Array.from(document.querySelectorAll('.agent-config-grid .agent-config'))
+    .find(other => other !== card && other.querySelector('.ag-id')?.value.trim() === data.id);
+  if (sameIdCard) return {error: `Agent ID 重复: ${data.id}`};
+
+  const oldId = card.dataset.agentId || '';
+  const agents = (state.fullAgents || state.agents || [])
+    .filter(a => a.id !== oldId && a.id !== data.id)
+    .map(a => ({...a}));
+  if (oldId && oldId !== data.id) data.old_id = oldId;
+  agents.push(data);
+  return {agents, data};
+}
+
+async function saveAgentCard(btn) {
+  const card = btn.closest('.agent-config');
+  if (!card) return;
+  setAgentCardStatus(card, '保存中…', '');
+  btn.disabled = true;
+  const payload = buildAgentPayloadForCard(card);
+  if (payload.error) {
+    btn.disabled = false;
+    setAgentCardStatus(card, payload.error, 'error');
+    return;
+  }
+  const result = await apiPost('/api/config/full', {agents: payload.agents});
+  btn.disabled = false;
+  if (!result || !result.ok) {
+    setAgentCardStatus(card, '保存失败: ' + (result?.error || '服务器错误'), 'error');
+    return;
+  }
+  const data = payload.data;
+  card.dataset.agentId = data.id;
+  const label = card.querySelector('.agent-display-label');
+  if (label) label.textContent = data.display_name || data.id;
+  setAgentCardStatus(card, '✓ 配置已保存', 'ok');
+  await loadConfig();
+  renderCachedDiscover();
+  setTimeout(() => setAgentCardStatus(card, '', ''), 3000);
+}
+
+async function saveFullConfig() {
+  const status = $('#saveStatus');
+  const result = await saveVisibleAgentConfig(status);
+  if (result.ok) {
+    if (status) {
+      status.textContent = '✓ 配置已保存';
+      status.className = 'save-status ok';
+      setTimeout(() => { status.textContent = ''; }, 3000);
+    }
+    await loadConfig();
     renderCachedDiscover();
-    setTimeout(() => { status.textContent = ''; }, 3000);
-  } else {
-    status.textContent = '保存失败: ' + (r?.error || '服务器错误');
-    status.className = 'save-status error';
   }
 }
 
