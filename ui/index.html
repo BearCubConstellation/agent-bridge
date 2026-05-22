@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Agent Bridge · 控制中心</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
 <script>
 (function() {
   try {
@@ -134,6 +135,17 @@ body {
   padding-bottom: var(--space-md);
   border-bottom: 1px solid var(--border);
 }
+.brand-main {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+}
+.brand-logo {
+  width: 34px; height: 34px; flex-shrink: 0;
+  object-fit: contain; display: block;
+}
+.brand-logo.logo-light { display: block; }
+.brand-logo.logo-dark { display: none; }
+html[data-theme="dark"] .brand-logo.logo-light { display: none; }
+html[data-theme="dark"] .brand-logo.logo-dark { display: block; }
 .logo {
   font-family: var(--font); font-size: 1.05em; font-weight: 700;
   background: linear-gradient(135deg, var(--accent), #ff6b8a);
@@ -690,6 +702,17 @@ body {
   gap: 4px;
   min-width: 0;
 }
+.page-title-row {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+}
+.page-logo {
+  width: 30px; height: 30px; flex-shrink: 0;
+  object-fit: contain; display: block;
+}
+.page-logo.logo-light { display: block; }
+.page-logo.logo-dark { display: none; }
+html[data-theme="dark"] .page-logo.logo-light { display: none; }
+html[data-theme="dark"] .page-logo.logo-dark { display: block; }
 .room-grid-title { font-size: 0.95em; color: var(--text2); font-weight: 600; }
 .room-grid-subtitle { font-size: 0.75em; color: var(--text3); margin-top: 4px; }
 .room-grid-summary {
@@ -1116,6 +1139,7 @@ body {
   border-radius: var(--radius); padding: var(--space-md) var(--space-lg); margin-bottom: var(--space-md);
 }
 .settings-section-title {
+  display: flex; align-items: center; gap: 10px;
   font-size: 0.78em; color: var(--text3); text-transform: uppercase;
   letter-spacing: 0.5px; margin-bottom: var(--space-sm); font-weight: 600;
 }
@@ -1531,7 +1555,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
     align-items: center; border-right: none; border-bottom: 1px solid var(--border);
     overflow-x: auto;
   }
-  .sidebar-brand { flex-direction: row; align-items: baseline; gap: 6px; padding-bottom: 0; border-bottom: none; }
+  .sidebar-brand { flex-direction: row; align-items: center; gap: 6px; padding-bottom: 0; border-bottom: none; }
+  .brand-main { gap: 6px; }
+  .brand-logo { width: 26px; height: 26px; }
   .sidebar-nav { flex-direction: row; gap: 2px; }
   .tab-btn { width: auto; padding: 6px 10px; font-size: var(--font-sm); }
   .tab-btn .nav-icon { font-size: 1em; width: auto; }
@@ -1960,6 +1986,12 @@ body {
   box-shadow: var(--shadow-md);
 }
 
+.agent-page-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .room-card.active {
   border-left-color: var(--accent);
   box-shadow: none;
@@ -2382,6 +2414,7 @@ pre,
     justify-content: space-between;
   }
   .theme-toggle { grid-area: theme; }
+  .page-logo { width: 26px; height: 26px; }
   .main-content {
     width: min(100%, calc(100vw - 28px));
     padding-top: 18px;
@@ -2443,7 +2476,11 @@ pre,
   <!-- ═══ Sidebar ═══ -->
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand">
-      <span class="logo">agent-bridge</span>
+      <div class="brand-main">
+        <img class="brand-logo logo-light" src="/icon/light.png" alt="" aria-hidden="true">
+        <img class="brand-logo logo-dark" src="/icon/dark.png" alt="" aria-hidden="true">
+        <span class="logo">agent-bridge</span>
+      </div>
       <span class="sidebar-sub">控制中心</span>
     </div>
 
@@ -2495,7 +2532,11 @@ pre,
         <!-- Room grid view (default) -->
         <article id="roomGridView" class="room-grid-view">
           <header class="room-grid-header">
-            <h2 class="room-grid-title">聊天室</h2>
+            <div class="page-title-row">
+              <img class="page-logo logo-light" src="/icon/light.png" alt="" aria-hidden="true">
+              <img class="page-logo logo-dark" src="/icon/dark.png" alt="" aria-hidden="true">
+              <h2 class="room-grid-title">聊天室</h2>
+            </div>
           </header>
           <div id="roomGrid" class="room-grid">
             <div class="empty-state"><div class="icon">💬</div><h3>加载中…</h3></div>
@@ -4136,7 +4177,11 @@ function renderGlobalSettings(data, area) {
 
   area.innerHTML = `<div class="settings-panel">
     <div class="settings-section global-section">
-      <div class="settings-section-title">全局</div>
+      <div class="settings-section-title">
+        <img class="page-logo logo-light" src="/icon/light.png" alt="" aria-hidden="true">
+        <img class="page-logo logo-dark" src="/icon/dark.png" alt="" aria-hidden="true">
+        <span>全局</span>
+      </div>
       <div class="settings-row">
         <label>共享目录</label>
         <input type="text" value="${escAttr(sharedDir)}" readonly style="color:var(--text3);font-family:var(--font);font-size:0.8em" />
@@ -4210,7 +4255,11 @@ function renderAgentConfig(data, area) {
   area.innerHTML = `<div class="settings-panel agent-page">
     <div class="agent-page-head">
       <div>
-        <div class="agent-page-title">Agent 管理</div>
+        <div class="agent-page-title">
+          <img class="page-logo logo-light" src="/icon/light.png" alt="" aria-hidden="true">
+          <img class="page-logo logo-dark" src="/icon/dark.png" alt="" aria-hidden="true">
+          <span>Agent 管理</span>
+        </div>
         <div class="agent-page-subtitle">配置、保存、扫描分区处理</div>
       </div>
       <div class="agent-page-count">${agents.length} 个 Agent</div>

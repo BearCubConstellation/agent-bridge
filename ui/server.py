@@ -677,9 +677,18 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
 
     def serve_static(self, filename):
         script_dir = Path(__file__).resolve().parent
-        filepath = (script_dir / filename).resolve()
-        # 防止路径遍历：确保解析后的路径仍在 script_dir 下
-        if not is_relative_to(filepath, script_dir):
+        project_dir = script_dir.parent
+        if filename in ("favicon.ico", "pageIcon.ico"):
+            static_root = project_dir / "icon"
+            filepath = (static_root / "pageIcon.ico").resolve()
+        elif filename.startswith("icon/"):
+            static_root = project_dir / "icon"
+            filepath = (project_dir / filename).resolve()
+        else:
+            static_root = script_dir
+            filepath = (script_dir / filename).resolve()
+        # 防止路径遍历：确保解析后的路径仍在允许的静态目录下
+        if not is_relative_to(filepath, static_root.resolve()):
             self.send_error(403)
             return
         if not filepath.exists():
@@ -694,6 +703,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             ".png": "image/png",
             ".jpg": "image/jpeg",
             ".svg": "image/svg+xml",
+            ".ico": "image/x-icon",
         }.get(ext, "application/octet-stream")
         self.send_response(200)
         self.send_header("Content-Type", ctype)
