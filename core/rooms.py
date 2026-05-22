@@ -377,8 +377,8 @@ def _extract_reply(body_text):
     except (json.JSONDecodeError, TypeError):
         pass
 
-    # Plain text fallback — must be substantial and not look like JSON
-    if len(text) >= 20 and not text.startswith("{"):
+    # Plain text fallback — must be substantive and not look like JSON
+    if len(text) >= 2 and not text.startswith("{"):
         return text
 
     return None

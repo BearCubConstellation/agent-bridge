@@ -403,7 +403,12 @@ class TestOpenClawPayloadFormat(unittest.TestCase):
 
         # Verify all required args fields
         self.assertEqual(args.get("sessionKey"), "session-abc-123")
-        self.assertEqual(args.get("message"), "Hello from the bridge!")
+        # message now contains callback instructions appended to original text
+        self.assertIn("Hello from the bridge!", args.get("message", ""))
+        self.assertIn("turn_id=turn_test123", args.get("message", ""))
+        self.assertIn("callback_url=http://127.0.0.1:7899/api/rooms/my-room/agents/my-agent/callback", args.get("message", ""))
+        self.assertIn("agent_bridge.reply_turn", args.get("message", ""))
+        # Structured fields also present
         self.assertEqual(args.get("turn_id"), "turn_test123")
         self.assertEqual(args.get("correlation_id"), "corr_test456")
         self.assertEqual(
@@ -726,6 +731,138 @@ class TestSendJsonStatus(unittest.TestCase):
                          f"Expected HTTP 200, got {status}. Body: {body}")
         data = json.loads(body)
         self.assertTrue(data["default"])
+
+
+# ══════════════════════════════════════════════════════════
+# Test 7: V2-only runtime
+# ══════════════════════════════════════════════════════════
+
+class TestV2RuntimeOnly(unittest.TestCase):
+    """Verify V2 mode uses runtime.run_room_step."""
+
+    def test_run_room_step_advances_turn(self):
+        """run_room_step should attempt delivery to first agent."""
+        import tempfile, shutil
+        from pathlib import Path
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
+
+        tmpdir = tempfile.mkdtemp()
+        try:
+            shared = Path(tmpdir)
+            from rooms import ensure_room, normalize_room, room_active_file
+            from storage import append_jsonl
+
+            room_id = "v2test"
+            room_cfg = normalize_room({
+                "id": room_id, "agents": ["agent-a", "agent-b"],
+                "order": ["agent-a", "agent-b"],
+            })
+            ensure_room(shared, room_cfg)
+
+            # Set room to running state
+            from rooms import write_room_state
+            from protocol import ROOM_RUNNING
+            state = {"status": ROOM_RUNNING, "turn_index": 0, "round": 0,
+                     "turn_count": 0, "max_turns": 50, "order": ["agent-a", "agent-b"],
+                     "current_turn": None, "last_message_id": "", "last_error": "",
+                     "waiting_for": "", "waiting_line": 0}
+            write_room_state(shared, room_id, state)
+
+            agents_cfg = {
+                "agent-a": {"adapter": {"type": "cli", "config": {"command": "echo sync reply"}}},
+                "agent-b": {"adapter": {"type": "manual"}},
+            }
+
+            active = room_active_file(shared, room_id)
+            append_jsonl(active, {
+                "id": "msg_test", "ts": "2026-05-23 12:00:00", "room": room_id,
+                "from": "user", "msg": "hello agent-a", "kind": "user",
+            })
+
+            config = {
+                "shared_dir": str(shared),
+                "agents": agents_cfg,
+                "rooms": {room_id: {**room_cfg}},
+                "server": {"host": "127.0.0.1", "port": 7899},
+            }
+
+            from runtime import run_room_step
+            result = run_room_step(config, room_id)
+            self.assertEqual(result.get("to_agent"), "agent-a",
+                             f"Expected to_agent=agent-a, got: {result}")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class TestOpenClawDiscovery(unittest.TestCase):
+    """Verify OpenClaw discovery generates openclaw_sessions adapter."""
+
+    def test_discovery_generates_openclaw_sessions(self):
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ui"))
+
+        from server import _discovered_agent
+        item = _discovered_agent(
+            "openclaw", "OpenClaw", "OpenClaw",
+            Path("/tmp/fake_home/.openclaw"), "test",
+            adapter_override={
+                "type": "openclaw_sessions",
+                "config": {"url": "http://127.0.0.1:18789/tools/invoke", "sessions_key": "agent:main:main"},
+                "auth": {"type": "bearer", "token_path": "/tmp/fake_home/.openclaw/openclaw.json"},
+                "response": {"mode": "callback", "timeout_seconds": 180},
+            },
+        )
+        self.assertEqual(item["adapter"]["type"], "openclaw_sessions")
+        self.assertIn("response", item["adapter"])
+        self.assertEqual(item["adapter"]["response"]["mode"], "callback")
+
+
+class TestOpenClawMessageCallbackInstructions(unittest.TestCase):
+    """Verify args.message contains full callback instructions."""
+
+    def test_message_contains_callback_block(self):
+        import sys, json
+        from pathlib import Path
+        from unittest import mock
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
+
+        from adapters.openclaw_sessions import OpenClawSessionsAdapter
+        adapter = OpenClawSessionsAdapter()
+        delivery_request = {
+            "room_id": "test-room", "agent_id": "openclaw",
+            "turn_id": "turn_abc", "correlation_id": "corr_xyz",
+            "message": "User said: hello", "from": "user",
+            "callback_url": "http://127.0.0.1:7899/api/rooms/test-room/agents/openclaw/callback",
+            "adapter": {
+                "type": "openclaw_sessions",
+                "config": {"url": "http://localhost:18789/tools/invoke", "sessions_key": "agent:main:main"},
+            },
+        }
+
+        with mock.patch("urllib.request.urlopen") as m_urlopen:
+            m_resp = mock.MagicMock()
+            m_resp.status = 200
+            m_resp.__enter__ = mock.MagicMock(return_value=m_resp)
+            m_resp.__exit__ = mock.MagicMock(return_value=False)
+            m_resp.read.return_value = b'{"status":"ok"}'
+            m_urlopen.return_value = m_resp
+            ticket = adapter.wake(delivery_request)
+
+        self.assertTrue(ticket["ok"])
+        req = m_urlopen.call_args[0][0]
+        payload = json.loads(req.data.decode("utf-8"))
+        msg = payload["args"]["message"]
+
+        self.assertIn("User said: hello", msg)
+        self.assertIn("room_id=test-room", msg)
+        self.assertIn("turn_id=turn_abc", msg)
+        self.assertIn("correlation_id=corr_xyz", msg)
+        self.assertIn("callback_url=http://127.0.0.1:7899/api/rooms/test-room/agents/openclaw/callback", msg)
+        self.assertIn("agent_bridge.reply_turn", msg)
+        self.assertIn("POST", msg)
 
 
 if __name__ == "__main__":

@@ -89,12 +89,28 @@ class OpenClawSessionsAdapter(BaseAdapter):
         rendered = render_template(message_template, context) if message_template else {}
 
         # Construct the OpenClaw /tools/invoke payload with args wrapper
+        # Build message with embedded callback instructions
+        callback_instruction = ""
+        if callback_url and turn_id:
+            callback_instruction = (
+                f"\n\n[Agent Bridge 回写指令]\n"
+                f"room_id={room_id}\n"
+                f"turn_id={turn_id}\n"
+                f"correlation_id={correlation_id}\n"
+                f"callback_url={callback_url}\n"
+                f"\n你必须在生成最终回复后写回 Agent Bridge。\n"
+                f"优先调用 MCP tool: agent_bridge.reply_turn。\n"
+                f"如果无法调用 MCP，请 POST 到 callback_url，请求体：\n"
+                f'{{"turn_id": "{turn_id}", "correlation_id": "{correlation_id}", "message": "你的回复内容"}}\n'
+            )
+        enriched_message = message + callback_instruction
+
         args_payload = {
             "sessionKey": sessions_key,
             "turn_id": turn_id,
             "correlation_id": correlation_id,
             "callback_url": callback_url,
-            "message": message,
+            "message": enriched_message,
             "from": from_agents,
             "room_id": room_id,
         }

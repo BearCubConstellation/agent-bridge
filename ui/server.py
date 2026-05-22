@@ -321,16 +321,18 @@ def _apply_bearer_secret_ref(wakeup, value):
     return "literal" if isinstance(value, str) and value.strip() else ""
 
 
-def _discovered_agent(agent_id, display_name, kind, source, details="", wakeup=None):
+def _discovered_agent(agent_id, display_name, kind, source, details="", wakeup=None, adapter_override=None):
     item = {
         "id": agent_id,
         "display_name": display_name,
         "kind": kind,
-        "source": _agent_source(source),
         "source_dir": _agent_source_dir(source),
         "details": details,
     }
-    if wakeup:
+    if adapter_override:
+        item["adapter"] = adapter_override
+        item["wakeup"] = adapter_to_wakeup(adapter_override) if adapter_override.get("type") == "native_http" else {}
+    elif wakeup:
         item["wakeup"] = wakeup
         item["adapter"] = wakeup_to_adapter(wakeup)
     else:
@@ -450,6 +452,16 @@ def discover_local_agents(shared_dir, include_bridge_config=True):
                     "tool": "sessions_send",
                     "args": {"sessionKey": "agent:main:main", "message": "{{message}}"},
                 },
+            },
+            adapter_override={
+                "type": "openclaw_sessions",
+                "config": {
+                    "url": "http://127.0.0.1:18789/tools/invoke",
+                    "sessions_key": "agent:main:main",
+                    "timeout": 60,
+                },
+                "auth": auth_cfg,
+                "response": {"mode": "callback", "timeout_seconds": 180},
             },
         ))
 
@@ -595,29 +607,48 @@ class PollManager:
             self._stop.wait(self.interval)
 
     def _do_poll(self):
-        """Run one poll cycle and update last_result/last_run."""
+        """Run one poll cycle — V2 Scheduler-aware."""
         config_path = Path(self.shared_dir) / BRIDGE_FILENAME
         if not config_path.exists():
             return self.last_result
 
-        try:
-            config = load_poll_config(str(config_path))
-            result = run_poll(config)
-            room_results = tick_running_rooms(config)
-            if room_results:
-                result["rooms"] = room_results
-        except Exception as e:
-            result = {"ok": False, "new_msgs": 0, "delivered": False,
-                      "archived": None, "error": str(e), "to_agent": "", "from_agent": ""}
+        config = load_poll_config(str(config_path))
+        sched = get_scheduler()
+        v2_active = sched and sched.is_running
 
-        # V2: scan running rooms into scheduler as fallback
-        try:
-            sched = get_scheduler()
-            if sched and sched.is_running:
+        if v2_active:
+            # V2 模式：只做 legacy 归档扫描 + scheduler fallback scan
+            # 不再调用旧 run_poll / tick_running_rooms，避免双驱动
+            result = {"ok": True, "new_msgs": 0, "delivered": False,
+                      "archived": None, "rooms": {}}
+            try:
+                # Legacy archive check (shared active.jsonl only)
+                shared = Path(self.shared_dir)
+                active = shared / "active.jsonl"
+                if active.exists():
+                    msgs = parse_jsonl(active)
+                    if len(msgs) > 200:
+                        name = do_archive(shared)
+                        if name:
+                            result["archived"] = name
+            except Exception:
+                pass
+            try:
                 sched.set_config(config)
-                sched.scan_running_rooms(config)
-        except Exception:
-            pass
+                enqueued = sched.scan_running_rooms(config)
+                result["scheduler_scan"] = enqueued
+            except Exception:
+                pass
+        else:
+            # 非 V2 模式：保留旧行为作为 fallback
+            try:
+                result = run_poll(config)
+                room_results = tick_running_rooms(config)
+                if room_results:
+                    result["rooms"] = room_results
+            except Exception as e:
+                result = {"ok": False, "new_msgs": 0, "delivered": False,
+                          "archived": None, "error": str(e), "to_agent": "", "from_agent": ""}
 
         with self._lock:
             self.last_result = result
@@ -1373,8 +1404,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         try:
             sched = get_scheduler()
             if sched:
-                if not sched._config:
-                    sched.set_config(cfg)
+                sched.set_config(cfg)
                 sched.schedule_room(room_id)
         except Exception:
             pass  # Scheduler not available — fall back to poll

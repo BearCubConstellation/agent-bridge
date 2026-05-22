@@ -324,6 +324,25 @@ def run_room_step(config, room_id):
             return {**result, "action": "sync_response", "to_agent": agent_id,
                     "delivered": True, "response_auto_written": True}
 
+        else:
+            # Sync response was empty or unparseable — log and advance anyway
+            _log_tick(shared_dir, room_id, "sync_empty",
+                      f"{agent_id} 同步回复为空或无法解析",
+                      level="warn", agent_id=agent_id,
+                      meta={"raw_response": response_body[:200] if response_body else ""})
+            # Still advance turn to avoid stuck state
+            next_index = (turn_index + 1) % len(order)
+            state["turn_index"] = next_index
+            state["round"] = int(state.get("round", 0)) + (1 if next_index == 0 else 0)
+            state["waiting_for"] = ""
+            state["waiting_line"] = 0
+            turn["state"] = TURN_COMPLETED
+            turn["last_error"] = "sync response empty"
+            state["current_turn"] = None
+            write_room_state(shared_dir, room_id, state)
+            return {**result, "action": "sync_empty", "to_agent": agent_id,
+                    "delivered": True, "response_auto_written": False}
+
     elif response_mode == RESPONSE_MCP_TOOL:
         # MCP tool response: instructions rendered, but not a real agent reply.
         # Enter waiting_response — external system will invoke callback.
