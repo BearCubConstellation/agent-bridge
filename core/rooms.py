@@ -534,6 +534,15 @@ def tick_room(config, room_id, force=False):
     state["turn_count"] = int(state.get("turn_count", 0)) + 1
     state["last_error"] = ""
 
+    # Log response body for debugging (truncated)
+    if response_body and response_body.strip():
+        _log_tick(shared_dir, room_id, "response_body", f"收到 {agent_id} 的响应体（{len(response_body)} 字符）", agent_id=agent_id, meta={
+            "length": len(response_body),
+            "preview": response_body[:300].replace("\n", "\\n"),
+        })
+    else:
+        _log_tick(shared_dir, room_id, "response_body", f"{agent_id} 的响应体为空", agent_id=agent_id, meta={"length": 0})
+
     # Try to extract a synchronous reply from the adapter response
     reply_text = _extract_reply(response_body)
     if reply_text:
