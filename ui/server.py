@@ -1095,7 +1095,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
 
         room = normalize_room({**cfg["rooms"][room_id], "id": room_id})
         if room_runtime_status(shared, room) == "running":
-            self.send_json({"ok": False, "error": "running room cannot be deleted"})
+            self.send_json({"ok": False, "error": "运行中的聊天室不能删除"})
             return
 
         del cfg["rooms"][room_id]

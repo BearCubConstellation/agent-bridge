@@ -710,7 +710,7 @@ body {
   border-left: 4px solid transparent;
   border-radius: var(--radius-lg);
   padding: var(--space-md) var(--space-lg);
-  cursor: pointer; position: relative;
+  cursor: default; position: relative;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -719,6 +719,30 @@ body {
 .room-card:hover { border-color: var(--border-hover); transform: translateY(-1px); box-shadow: var(--shadow-md); }
 .room-card:active { transform: scale(0.98); }
 .room-card.active { border-left-color: var(--green); box-shadow: 0 0 0 2px rgba(78,205,196,0.16); }
+.room-card.active::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(120deg, transparent 0%, rgba(78,205,196,0.08) 38%, rgba(78,205,196,0.16) 50%, rgba(78,205,196,0.08) 62%, transparent 100%);
+  background-size: 220% 100%;
+  animation: roomRunningGlow 2.8s linear infinite;
+  pointer-events: none;
+}
+.room-card.active::after {
+  content: '';
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 0 rgba(78,205,196,0.45);
+  animation: roomRunningDot 1.4s ease-in-out infinite;
+  pointer-events: none;
+}
 .room-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-md); }
 .room-card-main { min-width: 0; flex: 1; }
 .room-card-name {
@@ -734,9 +758,15 @@ body {
 .room-card-footer {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
   margin-top: auto;
+}
+.room-card-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 .room-card-action {
   border: 1px solid var(--border);
@@ -762,6 +792,11 @@ body {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
   background: color-mix(in srgb, var(--accent) 10%, var(--surface2));
+}
+.room-card-action.enter {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text3) 28%, var(--border));
+  background: color-mix(in srgb, var(--surface3) 58%, var(--surface2));
 }
 .room-card-action.danger:hover {
   color: var(--red);
@@ -894,6 +929,17 @@ body {
   color: color-mix(in srgb, var(--green) 82%, var(--text));
   border-color: color-mix(in srgb, var(--green) 32%, var(--border));
   background: color-mix(in srgb, var(--green) 12%, var(--surface2));
+}
+
+@keyframes roomRunningGlow {
+  0% { background-position: 0% 50%; opacity: 0.55; }
+  50% { opacity: 0.9; }
+  100% { background-position: 200% 50%; opacity: 0.55; }
+}
+
+@keyframes roomRunningDot {
+  0%, 100% { transform: scale(0.85); box-shadow: 0 0 0 0 rgba(78,205,196,0.42); }
+  50% { transform: scale(1); box-shadow: 0 0 0 8px rgba(78,205,196,0); }
 }
 
 /* ═══ Agent Source Panel (Drag) ═══ */
@@ -3049,14 +3095,17 @@ function renderRoomGrid(options = {}) {
     const statusClass = running ? 'active' : (isReady ? 'ready' : 'waiting');
     const statusText = running ? '运行中' : (isReady ? '已就绪' : '等待 Agent');
     const runText = running ? '暂停' : '开始';
-    html += `<div class="room-card ${statusClass}" data-room-id="${escAttr(room.id)}" onclick="openRoomConversation('${escAttr(room.id)}')">
+    html += `<div class="room-card ${statusClass}" data-room-id="${escAttr(room.id)}">
       <div class="room-card-header">
         <div class="room-card-name">${esc(room.name || room.id)}</div>
         <span class="room-status ${statusClass}">${statusText}</span>
       </div>
       <div class="room-card-agents">${renderAgentSlots(room)}</div>
       <div class="room-card-footer">
-        <button class="room-card-action primary" onclick="event.stopPropagation(); setRoomRunning('${escAttr(room.id)}', ${running ? 'false' : 'true'})">${runText}</button>
+        <div class="room-card-footer-left">
+          <button class="room-card-action enter" onclick="event.stopPropagation(); openRoomConversation('${escAttr(room.id)}')">进入房间</button>
+          <button class="room-card-action primary" onclick="event.stopPropagation(); setRoomRunning('${escAttr(room.id)}', ${running ? 'false' : 'true'})">${runText}</button>
+        </div>
         <button class="room-card-action danger room-del-btn" onclick="event.stopPropagation(); deleteRoom('${escAttr(room.id)}')" title="删除聊天室">删除</button>
       </div>
     </div>`;
@@ -3312,6 +3361,7 @@ async function setRoomRunning(roomId, running) {
   const action = running ? 'start' : 'pause';
   const result = await apiPost(`/api/rooms/${encodeURIComponent(roomId)}/${action}`, {});
   if (result && result.ok) {
+    toast(running ? '聊天室已开始运行' : '聊天室已暂停', 'ok');
     await loadRooms();
     if (state.currentRoomId === roomId) {
       await loadRoomMessages(roomId);
