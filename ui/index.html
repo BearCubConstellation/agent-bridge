@@ -4220,7 +4220,7 @@ function renderAgentSimpleFields(a) {
         <label>OpenClaw 会话</label>
         <input type="text" class="simple-sessions-key" value="${escAttr(sessionsKey)}" placeholder="agent:main:main" oninput="syncSimpleSessionsKey(this)" />
       </div>
-      <div class="openclaw-card-meta">已自动使用本地网关、认证文件和自动回写；通常只需要确认这个会话 Key。</div>
+      <div class="openclaw-card-meta">已自动使用本地网关、认证文件和自动回写。通常只需要保持 agent:main:main，不确定就不要改。</div>
     </div>
     <div class="agent-summary">${esc(agentConfigSummary(agent))}</div>
     <div class="simple-actions">
@@ -4456,7 +4456,7 @@ function renderWakeupHtml(wu, idx, agentId='') {
 
   return `<div class="wakeup-section" data-agent-idx="${idx}">
     <div class="wakeup-label-row">
-      <div class="wakeup-label">兼容 wakeup 配置</div>
+      <div class="wakeup-label">兼容旧版 wakeup 配置（普通用户无需修改）</div>
       <button class="scan-btn test-agent-btn" onclick="testAgent(this)">测试对话</button>
     </div>
     <div class="wakeup-field">
@@ -4669,6 +4669,10 @@ async function testAgent(btn) {
     return;
   }
   const agentName = data.display_name || data.id || 'Agent';
+  const adapterType = data.adapter?.type || 'manual';
+  const testingText = adapterType === 'openclaw_sessions'
+    ? '正在测试本地 OpenClaw 网关…'
+    : (adapterType === 'manual' ? '正在检查手动 Agent 配置…' : '正在向 Webhook 发送测试消息…');
   btn.disabled = true;
 
   const overlay = document.createElement('div');
@@ -4676,7 +4680,7 @@ async function testAgent(btn) {
   overlay.innerHTML = `<div class="test-modal">
     <div class="test-modal-icon loading"></div>
     <div class="test-modal-title">正在测试 ${esc(agentName)}</div>
-    <div class="test-modal-detail">正在向 Webhook 发送测试消息…</div>
+    <div class="test-modal-detail">${esc(testingText)}</div>
   </div>`;
   document.body.appendChild(overlay);
 
@@ -5051,7 +5055,7 @@ async function saveAgentCard(btn) {
   const label = card.querySelector('.agent-display-label');
   if (label) label.textContent = data.display_name || data.id;
   const summary = agentConfigSummary(data);
-  setAgentCardStatus(card, '配置已保存。' + summary, 'ok');
+  setAgentCardStatus(card, '已保存。下一步：去聊天室添加该 Agent 并点击开始。' + summary, 'ok');
   updateAgentSummary(card, true);
   await loadConfig();
   renderCachedDiscover();
@@ -5063,7 +5067,7 @@ async function saveFullConfig() {
   const result = await saveVisibleAgentConfig(status);
   if (result.ok) {
     if (status) {
-      status.textContent = '配置已保存。' + (result.agents || []).map(agentConfigSummary).slice(0, 1).join('');
+      status.textContent = '已保存。下一步：去聊天室添加该 Agent 并点击开始。' + (result.agents || []).map(agentConfigSummary).slice(0, 1).join('');
       status.className = 'save-status ok';
       setTimeout(() => { status.textContent = ''; }, 5000);
     }

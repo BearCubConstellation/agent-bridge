@@ -254,7 +254,7 @@ def run_room_step(config, room_id):
     elapsed = round(_time.monotonic() - t0, 2)
 
     delivered = ticket.get("ok", False)
-    detail = ticket.get("detail", ticket.get("error", ""))
+    detail = ticket.get("detail") or ticket.get("error", "")
     response_body = ticket.get("sync_response", "")
     response_mode = ticket.get("response_mode", RESPONSE_CALLBACK)
 
