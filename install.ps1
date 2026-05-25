@@ -8,9 +8,10 @@
 $ErrorActionPreference = "Stop"
 
 $Repo = "SusuAgent/agent-bridge"
-$Branch = "main"
+$Branch = "dev"
 $InstallDir = "$env:USERPROFILE\.agent-bridge"
 $SrcDir = "$InstallDir\src"
+$PidFile = "$InstallDir\.server.pid"
 
 function Write-Ok($msg)   { Write-Host "  " -NoNewline; Write-Host "OK" -ForegroundColor Green -NoNewline; Write-Host "  $msg" }
 function Write-Err($msg)  { Write-Host "  " -NoNewline; Write-Host "ERR" -ForegroundColor Red -NoNewline; Write-Host " $msg" }
@@ -95,6 +96,16 @@ function Main {
     }
     $pythonCmd = Format-PythonCommand $pythonInfo
     Write-Ok "Python $ver ($pythonCmd)"
+
+    # --- Stop old UI service before replacing source ---
+    if (Test-Path $PidFile) {
+        $oldPid = (Get-Content $PidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
+        if ($oldPid -match '^\d+$') {
+            Write-Info "Stopping running UI service (PID $oldPid)..."
+            taskkill /F /PID $oldPid 2>$null | Out-Null
+        }
+        Remove-Item -Path $PidFile -Force -ErrorAction SilentlyContinue
+    }
 
     # --- Download source ---
     Write-Info "Downloading source..."
