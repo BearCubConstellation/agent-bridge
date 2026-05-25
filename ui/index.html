@@ -5055,7 +5055,7 @@ async function saveAgentCard(btn) {
   const label = card.querySelector('.agent-display-label');
   if (label) label.textContent = data.display_name || data.id;
   const summary = agentConfigSummary(data);
-  setAgentCardStatus(card, '已保存。下一步：去聊天室添加该 Agent 并点击开始。' + summary, 'ok');
+  setAgentCardStatus(card, '已保存。下一步：去聊天室添加该 Agent 并点击开始。当前配置：' + summary, 'ok');
   updateAgentSummary(card, true);
   await loadConfig();
   renderCachedDiscover();
@@ -5067,7 +5067,7 @@ async function saveFullConfig() {
   const result = await saveVisibleAgentConfig(status);
   if (result.ok) {
     if (status) {
-      status.textContent = '已保存。下一步：去聊天室添加该 Agent 并点击开始。' + (result.agents || []).map(agentConfigSummary).slice(0, 1).join('');
+      status.textContent = '已保存。下一步：去聊天室添加该 Agent 并点击开始。当前配置：' + (result.agents || []).map(agentConfigSummary).slice(0, 1).join('');
       status.className = 'save-status ok';
       setTimeout(() => { status.textContent = ''; }, 5000);
     }
