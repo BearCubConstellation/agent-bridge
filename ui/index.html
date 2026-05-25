@@ -4190,9 +4190,9 @@ function renderAdapterHtml(adapter, wakeup, idx) {
   const tokenJsonpath = auth.token_jsonpath || '';
   const tokenEnv = auth.token_env || '';
   return `<div class="adapter-section" data-agent-idx="${idx}">
-    <div class="wakeup-label">Adapter V2</div>
+    <div class="wakeup-label">适配器 V2</div>
     <div class="wakeup-field">
-      <label>adapter.type</label>
+      <label>适配器类型</label>
       <select class="ad-type" onchange="adapterTypeChange(this)">
         <option value="manual" ${type==='manual'?'selected':''}>manual</option>
         <option value="native_http" ${type==='native_http'?'selected':''}>native_http</option>
@@ -4201,15 +4201,15 @@ function renderAdapterHtml(adapter, wakeup, idx) {
     </div>
     <div class="adapter-fields ad-http-fields ${type==='manual'?'hidden':''}">
       <div class="wakeup-field">
-        <label>adapter.config.url</label>
+        <label>调用地址</label>
         <input type="text" class="ad-url" value="${escAttr(cfg.url || '')}" placeholder="http://127.0.0.1:18789/tools/invoke" />
       </div>
       <div class="wakeup-field ad-openclaw-only ${type==='openclaw_sessions'?'':'hidden'}">
-        <label>adapter.config.sessions_key</label>
+        <label>OpenClaw 会话 Key</label>
         <input type="text" class="ad-sessions-key" value="${escAttr(cfg.sessions_key || cfg.sessionsKey || '')}" placeholder="agent:main:main" />
       </div>
       <div class="wakeup-field auth-section">
-        <label>adapter.auth</label>
+        <label>认证方式</label>
         <select class="ad-auth-type" onchange="authTypeChange(this)">
           <option value="none" ${authType==='none'?'selected':''}>无</option>
           <option value="bearer" ${authType==='bearer'?'selected':''}>Bearer Token</option>
@@ -4224,7 +4224,7 @@ function renderAdapterHtml(adapter, wakeup, idx) {
         </div>
       </div>
       <div class="wakeup-field">
-        <label>adapter.response.mode</label>
+        <label>回复接收方式</label>
         <select class="ad-response-mode">
           <option value="callback" ${responseMode==='callback'?'selected':''}>callback</option>
           <option value="pull_session" ${responseMode==='pull_session'?'selected':''}>pull_session</option>
@@ -4233,7 +4233,7 @@ function renderAdapterHtml(adapter, wakeup, idx) {
         </select>
       </div>
       <div class="wakeup-field">
-        <label>adapter.response.timeout_seconds</label>
+        <label>回复超时秒数</label>
         <input type="number" class="ad-timeout-seconds" value="${escAttr(timeoutSeconds)}" min="1" step="1" />
       </div>
     </div>
