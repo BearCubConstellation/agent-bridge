@@ -157,6 +157,19 @@ def _classify_conn_error(detail, url):
     return detail
 
 
+def _probe_http_reachable(url, timeout=10):
+    try:
+        import urllib.error
+        import urllib.request
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return True, f"status={resp.status}"
+    except urllib.error.HTTPError as e:
+        return True, f"HTTP {e.code}"
+    except Exception as e:
+        return False, str(e)
+
+
 def _default_wakeup():
     return {
         "url": "",
@@ -726,6 +739,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "/api/poll/history": self.handle_poll_history,
             "/api/send": self.handle_send_message,
             "/api/agent/test": self.handle_test_agent,
+            "/api/agent/integration-test": self.handle_agent_integration_test,
             "/api/rooms": self.handle_save_room,
             "/api/rooms/delete": self.handle_delete_room,
         }
@@ -1585,10 +1599,24 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json(err)
             return
 
-        wakeup = body.get("wakeup", {})
         adapter = body.get("adapter")
         if adapter:
+            adapter_type = adapter.get("type", "")
+            cfg = adapter.get("config") or {}
+            url = (cfg.get("url") or "").strip()
+            if not url:
+                self.send_json({"ok": False, "error": "Webhook URL not configured"})
+                return
+            if adapter_type in ("openclaw_sessions", "native_http"):
+                success, detail = _probe_http_reachable(url)
+                if success:
+                    self.send_json({"ok": True, "status": detail})
+                else:
+                    self.send_json({"ok": False, "error": _classify_conn_error(detail, url), "raw": detail})
+                return
             wakeup = adapter_to_wakeup(adapter)
+        else:
+            wakeup = body.get("wakeup", {})
         url = wakeup.get("url", "").strip()
         if not url:
             self.send_json({"ok": False, "error": "Webhook URL not configured"})
@@ -1600,6 +1628,99 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         else:
             msg = _classify_conn_error(detail, url)
             self.send_json({"ok": False, "error": msg, "raw": detail})
+
+    def handle_agent_integration_test(self):
+        body, err = self._read_json_body()
+        if err:
+            self.send_json(err)
+            return
+
+        agent_id = (body.get("agent_id") or "").strip()
+        if not validate_agent_id(agent_id):
+            self.send_json({"ok": False, "error": "invalid agent_id"})
+            return
+
+        shared = Path(self.shared_dir)
+        cfg, config_path = read_bridge(shared)
+        if agent_id not in cfg.get("agents", {}):
+            self.send_json({"ok": False, "error": "请先保存 Agent 配置"})
+            return
+
+        rooms = cfg.get("rooms", {})
+        room_id = ""
+        room = None
+        for rid, item in rooms.items():
+            if agent_id in (item.get("agents") or []):
+                room_id = rid
+                room = item
+                break
+        if not room_id or not room:
+            self.send_json({"ok": False, "error": "请先把该 Agent 加入一个聊天室"})
+            return
+
+        room_cfg = normalize_room({**room, "id": room_id})
+        state = read_room_state(shared, room_id, room_cfg)
+        state = migrate_room_state(state, room_cfg)
+        current_turn = state.get("current_turn") or {}
+        if current_turn and not current_turn.get("response_message_id"):
+            self.send_json({"ok": False, "error": f"聊天室正在等待 {current_turn.get('agent_id', '')} 回复，请稍后再试"})
+            return
+
+        agents = room_cfg.get("agents") or []
+        order = room_cfg.get("order") or agents
+        if agent_id not in order:
+            order = [agent_id] + [aid for aid in order if aid != agent_id]
+            room_cfg["order"] = order
+            cfg["rooms"][room_id]["order"] = order
+
+        ensure_room(shared, room_cfg)
+        state["status"] = ROOM_RUNNING
+        state["turn_index"] = order.index(agent_id)
+        state["current_turn"] = None
+        state["waiting_for"] = ""
+        state["last_error"] = ""
+        write_room_state(shared, room_id, state)
+        cfg["rooms"][room_id]["status"] = ROOM_RUNNING
+        write_bridge(config_path, cfg)
+
+        text = body.get("text") or "Agent Bridge 联调测试：请通过 callback 回写一句简短确认。"
+        msg = append_room_message(
+            shared, room_id, "user", text,
+            to_agent=agent_id, kind="user",
+            meta={"source": "integration_test", "target": agent_id},
+        )
+        emit_event(shared, room_id, EVT_MESSAGE_CREATED, actor="user",
+                   message_id=msg.get("id", ""), meta={"source": "integration_test", "target": agent_id})
+
+        result = run_room_step(cfg, room_id)
+        next_state = read_room_state(shared, room_id, room_cfg)
+        turn = (next_state.get("current_turn") or {})
+        if not result.get("ok", True):
+            self.send_json({"ok": False, "error": result.get("error", "Runtime V2 联调失败"), "result": result})
+            return
+        action = result.get("action")
+        if action == "sync_response":
+            self.send_json({
+                "ok": True,
+                "room_id": room_id,
+                "agent_id": agent_id,
+                "message_id": msg.get("id", ""),
+                "response_received": True,
+                "result": result,
+            })
+            return
+        if action != "waiting":
+            self.send_json({"ok": False, "error": result.get("error", f"Runtime V2 未进入等待回写状态: {action}"), "result": result})
+            return
+        self.send_json({
+            "ok": True,
+            "room_id": room_id,
+            "agent_id": agent_id,
+            "message_id": msg.get("id", ""),
+            "turn_id": turn.get("turn_id", ""),
+            "correlation_id": turn.get("correlation_id", ""),
+            "result": result,
+        })
 
     def handle_bridge_yaml(self):
         shared = Path(self.shared_dir)

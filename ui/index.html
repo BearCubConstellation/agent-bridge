@@ -1348,6 +1348,12 @@ html[data-theme="dark"] .page-logo.logo-dark { display: block; }
   line-height: 1.5;
   margin-top: 6px;
 }
+.field-hint {
+  margin-top: 4px;
+  color: var(--text3);
+  font-size: 0.7em;
+  line-height: 1.45;
+}
 .simple-actions {
   display: flex;
   align-items: center;
@@ -4202,6 +4208,11 @@ function renderAgentSimpleFields(a) {
         <input type="text" class="ag-name" value="${escAttr(agent.display_name || agent.id || '')}" placeholder="例如 OpenClaw" />
       </div>
       <div class="wakeup-field">
+        <label>唯一标识</label>
+        <input type="text" class="ag-id" value="${escAttr(agent.id || '')}" placeholder="${type==='openclaw'?'openclaw':'例如 momo'}" oninput="updateAgentTokenPlaceholders(this.closest('.agent-config')); updateAgentSummary(this.closest('.agent-config'))" />
+        <div class="field-hint">用于在聊天室里识别这个 Agent，只能用字母、数字、-、_。</div>
+      </div>
+      <div class="wakeup-field">
         <label>Agent 类型</label>
         <select class="agent-type-select" onchange="agentTypeChange(this)">
           <option value="openclaw" ${type==='openclaw'?'selected':''}>OpenClaw</option>
@@ -4225,6 +4236,7 @@ function renderAgentSimpleFields(a) {
     <div class="agent-summary">${esc(agentConfigSummary(agent))}</div>
     <div class="simple-actions">
       <button class="scan-btn test-agent-btn" onclick="testAgent(this)">测试连接</button>
+      <button class="scan-btn test-agent-btn" onclick="runAgentIntegrationTest(this)">发送测试消息</button>
     </div>
   </div>`;
 }
@@ -4241,10 +4253,6 @@ function renderAgentBaseFields(a) {
   const agent = a || {};
   const color = agent.color || '#8888a0';
   return `<div class="form-grid">
-    <div class="wakeup-field">
-      <label>Agent ID</label>
-      <input type="text" class="ag-id" value="${escAttr(agent.id || '')}" placeholder="e.g. momo" oninput="updateAgentTokenPlaceholders(this.closest('.agent-config'))" />
-    </div>
     <div class="wakeup-field">
       <label>颜色</label>
       <div class="agent-color-control">
@@ -4383,6 +4391,8 @@ function ensureOpenClawDefaults(card) {
   if (!card) return;
   const adType = card.querySelector('.ad-type');
   if (adType) adType.value = 'openclaw_sessions';
+  const idInput = card.querySelector('.ag-id');
+  if (idInput && !idInput.value.trim()) idInput.value = nextAgentId('openclaw');
   const fields = card.querySelector('.ad-http-fields');
   if (fields) fields.classList.remove('hidden');
   const openclaw = card.querySelector('.ad-openclaw-only');
@@ -4398,6 +4408,7 @@ function ensureOpenClawDefaults(card) {
   if (mode) mode.value = 'callback';
   const timeout = card.querySelector('.ad-timeout-seconds');
   if (timeout && !timeout.value) timeout.value = '180';
+  updateAgentTokenPlaceholders(card);
 }
 
 function agentTypeChange(sel) {
@@ -4423,6 +4434,18 @@ function syncSimpleSessionsKey(input) {
   const target = card?.querySelector('.ad-sessions-key');
   if (target) target.value = input.value;
   updateAgentSummary(card);
+}
+
+function nextAgentId(base) {
+  const existing = new Set(Array.from(document.querySelectorAll('.agent-config .ag-id'))
+    .map(input => input.value.trim())
+    .filter(Boolean));
+  if (!existing.has(base)) return base;
+  for (let i = 2; i < 100; i++) {
+    const candidate = `${base}-${i}`;
+    if (!existing.has(candidate)) return candidate;
+  }
+  return `${base}-${Date.now()}`;
 }
 
 function updateAgentSummary(card, saved=false) {
@@ -4671,8 +4694,8 @@ async function testAgent(btn) {
   const agentName = data.display_name || data.id || 'Agent';
   const adapterType = data.adapter?.type || 'manual';
   const testingText = adapterType === 'openclaw_sessions'
-    ? '正在测试本地 OpenClaw 网关…'
-    : (adapterType === 'manual' ? '正在检查手动 Agent 配置…' : '正在向 Webhook 发送测试消息…');
+    ? '正在测试本地 OpenClaw 网关是否可达…'
+    : (adapterType === 'manual' ? '正在检查手动 Agent 配置…' : '正在测试 Webhook 是否可达…');
   btn.disabled = true;
 
   const overlay = document.createElement('div');
@@ -4684,7 +4707,7 @@ async function testAgent(btn) {
   </div>`;
   document.body.appendChild(overlay);
 
-  const res = await apiPost('/api/agent/test', {wakeup: data.wakeup});
+  const res = await apiPost('/api/agent/test', {wakeup: data.wakeup, adapter: data.adapter});
   const modal = overlay.querySelector('.test-modal');
   const icon = modal.querySelector('.test-modal-icon');
   const title = modal.querySelector('.test-modal-title');
@@ -4695,9 +4718,9 @@ async function testAgent(btn) {
     if (state) state.value = '连接正常';
     icon.className = 'test-modal-icon success';
     icon.textContent = '✓';
-    title.textContent = '连通成功';
+    title.textContent = '连接可达';
     detail.className = 'test-modal-detail success';
-    detail.textContent = agentName + ' 响应正常（' + (res.status || '') + '）';
+    detail.textContent = agentName + ' 的连接入口响应正常（' + (res.status || '') + '）。这不代表 callback 已完成回写。';
   } else {
     const state = card.querySelector('.agent-connection-state');
     if (state) state.value = '连接失败';
@@ -4712,6 +4735,70 @@ async function testAgent(btn) {
   const close = () => { overlay.remove(); btn.disabled = false; };
   modal.querySelector('.test-modal-close').onclick = close;
   overlay.onclick = e => { if (e.target === overlay) close(); };
+}
+
+async function runAgentIntegrationTest(btn) {
+  const card = btn.closest('.agent-config');
+  if (!card) return;
+  const data = collectAgentData(card);
+  const agentName = data.display_name || data.id || 'Agent';
+  if (!data.id) {
+    setAgentCardStatus(card, '请先填写唯一标识并保存 Agent', 'error');
+    return;
+  }
+  btn.disabled = true;
+  const overlay = document.createElement('div');
+  overlay.className = 'test-modal-overlay';
+  overlay.innerHTML = `<div class="test-modal">
+    <div class="test-modal-icon loading"></div>
+    <div class="test-modal-title">正在联调 ${esc(agentName)}</div>
+    <div class="test-modal-detail">将通过 Runtime V2 发送一条测试消息，并等待 callback 回写。</div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const modal = overlay.querySelector('.test-modal');
+  const icon = modal.querySelector('.test-modal-icon');
+  const title = modal.querySelector('.test-modal-title');
+  const detail = modal.querySelector('.test-modal-detail');
+  const finish = (ok, titleText, detailText) => {
+    icon.className = 'test-modal-icon ' + (ok ? 'success' : 'failure');
+    icon.textContent = ok ? '✓' : '✗';
+    title.textContent = titleText;
+    detail.className = 'test-modal-detail ' + (ok ? 'success' : 'failure');
+    detail.textContent = detailText;
+    modal.insertAdjacentHTML('beforeend', '<div class="test-modal-actions"><button class="test-modal-close">关闭</button></div>');
+    const close = () => { overlay.remove(); btn.disabled = false; };
+    modal.querySelector('.test-modal-close').onclick = close;
+    overlay.onclick = e => { if (e.target === overlay) close(); };
+  };
+
+  const started = await apiPost('/api/agent/integration-test', {agent_id: data.id});
+  if (!started || !started.ok) {
+    finish(false, '联调未开始', started?.error || '请先保存 Agent，并把它加入一个聊天室');
+    return;
+  }
+  if (started.response_received) {
+    const state = card.querySelector('.agent-connection-state');
+    if (state) state.value = '联调通过';
+    finish(true, '已收到同步回复', `${agentName} 已通过 Runtime V2 完成一次测试消息回复。`);
+    return;
+  }
+  const turnId = started.turn_id || '';
+  const roomId = started.room_id || '';
+  detail.textContent = `测试消息已发送到 ${roomId}，正在等待 callback 回写…`;
+  for (let i = 0; i < 30; i++) {
+    await delay(1000);
+    const messages = await apiGet(`/api/rooms/${encodeURIComponent(roomId)}/messages`);
+    const reply = (messages?.messages || []).find(m =>
+      m.from === data.id && (m.reply_to === turnId || m.correlation_id === started.correlation_id)
+    );
+    if (reply) {
+      const state = card.querySelector('.agent-connection-state');
+      if (state) state.value = '联调通过';
+      finish(true, 'callback 已回写', `${agentName} 已通过 Runtime V2 完成一次测试消息回写。`);
+      return;
+    }
+  }
+  finish(false, '仍在等待 callback', `${agentName} 已收到测试投递，但 30 秒内没有看到 callback 回写。`);
 }
 
 async function loadSettings() {
