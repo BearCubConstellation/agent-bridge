@@ -567,6 +567,36 @@ html[data-theme="dark"] .brand-logo.logo-dark { display: block; }
   transition: border-color var(--transition), box-shadow var(--transition);
 }
 .room-log-panel:hover { border-color: var(--border-hover); }
+.room-turn-status {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px;
+  margin-bottom: 10px;
+  background: var(--surface2);
+}
+.room-turn-title {
+  font-size: 0.72em;
+  color: var(--text3);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.room-turn-grid {
+  display: grid;
+  gap: 6px;
+}
+.room-turn-row {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 8px;
+  font-family: var(--font);
+  font-size: 0.72rem;
+}
+.room-turn-key { color: var(--text3); }
+.room-turn-value {
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .room-log-header {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--space-sm); margin-bottom: var(--space-sm);
@@ -1285,6 +1315,8 @@ html[data-theme="dark"] .page-logo.logo-dark { display: block; }
 /* ═══ Wakeup Section ═══ */
 .wakeup-section { margin-top: var(--space-sm); padding-top: var(--space-sm); border-top: 1px solid var(--border); }
 .advanced-agent-settings .wakeup-section { border-top: none; padding-top: 0; }
+.adapter-section { margin-top: var(--space-sm); padding-top: var(--space-sm); border-top: 1px solid var(--border); }
+.adapter-fields.hidden { display: none; }
 .wakeup-label {
   font-size: 0.68em; color: var(--text3);
   text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: var(--space-xs);
@@ -2587,6 +2619,7 @@ pre,
                   </button>
                 </div>
               </div>
+              <div id="roomTurnStatus" class="room-turn-status"></div>
               <div id="roomLogArea" class="room-log-list"></div>
             </aside>
           </div>
@@ -2653,6 +2686,7 @@ const pollLabel = $('#pollLabel');
 const pollBtn = $('#pollBtn');
 const roomLogArea = $('#roomLogArea');
 const roomLogCount = $('#roomLogCount');
+const roomTurnStatus = $('#roomTurnStatus');
 const configBanner = $('#configBanner');
 const themeToggle = $('#themeToggle');
 
@@ -2804,13 +2838,21 @@ function getConfigIssues(data) {
   else if (!ids.has(data.agent_id)) issues.push(`本机角色 ${data.agent_id} 不在 Agent 列表中`);
   for (const a of agents) {
     const name = a.display_name || a.id || '未命名 Agent';
+    const adapter = a.adapter || {};
+    const adapterType = adapter.type || (a.wakeup && a.wakeup.url ? 'native_http' : 'manual');
+    const adapterConfig = adapter.config || {};
     if (!a.id) issues.push(`${name}: Agent ID 不能为空`);
     if (a.sample) {
       issues.push(`${name}: 示例 Agent，需替换为真实 Agent`);
       continue;
     }
-    if (!a.wakeup || !a.wakeup.url) issues.push(`${name}: 填写 Webhook URL`);
-    if (!a.wakeup || !a.wakeup.body_template) issues.push(`${name}: 确认消息体模板`);
+    if (adapterType === 'openclaw_sessions') {
+      if (!adapterConfig.url) issues.push(`${name}: 填写 OpenClaw URL`);
+      if (!adapterConfig.sessions_key && !adapterConfig.sessionsKey) issues.push(`${name}: 填写 sessions_key`);
+    } else if (adapterType === 'native_http') {
+      if (!adapterConfig.url && (!a.wakeup || !a.wakeup.url)) issues.push(`${name}: 填写 Webhook URL`);
+      if (!a.wakeup || !a.wakeup.body_template) issues.push(`${name}: 确认消息体模板`);
+    }
   }
   return issues;
 }
@@ -2970,6 +3012,39 @@ function populateAgentCard(card, agent) {
   const cursor = card.querySelector('.ag-cursor');
   if (cursor) cursor.value = agent.cursor || 'line';
 
+  const adapter = agent.adapter || adapterFromWakeup(agent.wakeup || {});
+  const adapterSection = card.querySelector('.adapter-section');
+  if (adapterSection) {
+    const type = adapter.type || 'manual';
+    const cfg = adapter.config || {};
+    const auth = adapter.auth || {};
+    const response = adapter.response || {};
+    const typeSelect = adapterSection.querySelector('.ad-type');
+    if (typeSelect) {
+      typeSelect.value = type;
+      adapterTypeChange(typeSelect);
+    }
+    const adUrl = adapterSection.querySelector('.ad-url');
+    const sessionsKey = adapterSection.querySelector('.ad-sessions-key');
+    const adAuthType = adapterSection.querySelector('.ad-auth-type');
+    const adTokenPath = adapterSection.querySelector('.ad-token-path');
+    const adTokenJsonpath = adapterSection.querySelector('.ad-token-jsonpath');
+    const adTokenEnv = adapterSection.querySelector('.ad-token-env');
+    const responseMode = adapterSection.querySelector('.ad-response-mode');
+    const timeoutSeconds = adapterSection.querySelector('.ad-timeout-seconds');
+    if (adUrl) adUrl.value = cfg.url || '';
+    if (sessionsKey) sessionsKey.value = cfg.sessions_key || cfg.sessionsKey || '';
+    if (adAuthType) {
+      adAuthType.value = auth.type === 'bearer' ? 'bearer' : 'none';
+      authTypeChange(adAuthType);
+    }
+    if (adTokenPath) adTokenPath.value = auth.token_path || '';
+    if (adTokenJsonpath) adTokenJsonpath.value = auth.token_jsonpath || '';
+    if (adTokenEnv) adTokenEnv.value = auth.token_env || '';
+    if (responseMode) responseMode.value = response.mode || (type === 'openclaw_sessions' ? 'callback' : 'callback');
+    if (timeoutSeconds) timeoutSeconds.value = response.timeout_seconds ?? 180;
+  }
+
   const wu = agent.wakeup || {};
   const section = card.querySelector('.wakeup-section');
   if (!section) return;
@@ -3020,6 +3095,10 @@ function addDiscoveredAgent(index) {
   const cards = grid.querySelectorAll('.agent-config');
   const card = cards[cards.length - 1];
   populateAgentCard(card, {...agent, color: agent.color && agent.color !== '#8888a0' ? agent.color : randomAgentColor()});
+  if (agent.adapter?.type === 'openclaw_sessions') {
+    const details = card.querySelector('.advanced-agent-settings');
+    if (details) details.open = true;
+  }
   const status = $('#saveStatus');
   if (status) {
     status.textContent = '已添加到表单，请在该 Agent 卡片中保存配置';
@@ -3613,6 +3692,7 @@ function openRoomConversation(roomId) {
   state.roomLogs = [];
   renderSkeletonChat();
   renderRoomLogs({ loading: true });
+  renderRoomTurnStatus({loading: true});
   updateStats();
 
   // Populate compose select with room agents only
@@ -3685,14 +3765,16 @@ async function loadRoomMessages(roomId = state.currentRoomId, seq = null) {
   if (!roomId) return;
   const requestSeq = seq == null ? ++state.roomViewSeq : seq;
   const encodedRoomId = encodeURIComponent(roomId);
-  const [data, logsData] = await Promise.all([
+  const [data, logsData, turnData] = await Promise.all([
     apiGet(`/api/rooms/${encodedRoomId}/messages`),
     apiGet(`/api/rooms/${encodedRoomId}/logs`),
+    apiGet(`/api/rooms/${encodedRoomId}/turn`),
   ]);
-  if ((!data || !data.ok) && (!logsData || !logsData.ok)) {
+  if ((!data || !data.ok) && (!logsData || !logsData.ok) && (!turnData || !turnData.ok)) {
     if (state.currentRoomId === roomId && state.roomViewSeq === requestSeq && state.messages.length === 0 && state.roomLogs.length === 0) {
       renderMessages();
       renderRoomLogs();
+      renderRoomTurnStatus();
       updateStats();
     }
     return;
@@ -3701,9 +3783,46 @@ async function loadRoomMessages(roomId = state.currentRoomId, seq = null) {
   const q = (state.searchQuery || '').toLowerCase();
   state.messages = data && data.ok ? (data.messages || []).filter(m => !q || String(m.msg || '').toLowerCase().includes(q)) : [];
   state.roomLogs = logsData && logsData.ok ? (logsData.logs || []) : [];
+  state.currentTurn = turnData && turnData.ok ? turnData : null;
   renderMessages();
   renderRoomLogs();
+  renderRoomTurnStatus();
   updateStats();
+}
+
+function renderRoomTurnStatus(options = {}) {
+  if (!roomTurnStatus) return;
+  if (options.loading) {
+    roomTurnStatus.innerHTML = '<div class="room-turn-title">当前 Turn</div><div class="room-turn-value">加载中...</div>';
+    return;
+  }
+  const data = state.currentTurn || {};
+  const turn = data.current_turn || null;
+  if (!turn) {
+    roomTurnStatus.innerHTML = `<div class="room-turn-title">当前 Turn</div>
+      <div class="room-turn-grid">
+        <div class="room-turn-row"><span class="room-turn-key">status</span><span class="room-turn-value">${esc(data.status || 'paused')}</span></div>
+        <div class="room-turn-row"><span class="room-turn-key">turn_index</span><span class="room-turn-value">${esc(data.turn_index ?? '-')}</span></div>
+        <div class="room-turn-row"><span class="room-turn-key">waiting</span><span class="room-turn-value">无</span></div>
+      </div>`;
+    return;
+  }
+  const waiting = turn.state === 'waiting_response' && !turn.response_message_id;
+  const callbackState = turn.response_message_id ? '已收到' : (waiting ? '等待 callback' : '未完成');
+  const rows = [
+    ['status', data.status || ''],
+    ['turn_index', data.turn_index ?? ''],
+    ['turn', turn.agent_id || ''],
+    ['turn_id', turn.turn_id || ''],
+    ['correlation_id', turn.correlation_id || ''],
+    ['waiting_response', waiting ? 'true' : 'false'],
+    ['callback', callbackState],
+    ['timeout_at', turn.timeout_at || ''],
+  ];
+  roomTurnStatus.innerHTML = `<div class="room-turn-title">当前 Turn</div>
+    <div class="room-turn-grid">
+      ${rows.map(([k, v]) => `<div class="room-turn-row"><span class="room-turn-key">${esc(k)}</span><span class="room-turn-value">${esc(v)}</span></div>`).join('')}
+    </div>`;
 }
 
 // Runtime log
@@ -4024,7 +4143,9 @@ function renderAgentBaseFields(a) {
 
 function renderAgentAdvancedHtml(a, idx) {
   const agent = a || {};
-  return `<details class="advanced-agent-settings">
+  const adapterType = agent.adapter?.type || '';
+  const open = adapterType === 'openclaw_sessions' ? ' open' : '';
+  return `<details class="advanced-agent-settings"${open}>
     <summary>更多设置</summary>
     <div class="form-grid">
       <div class="wakeup-field">
@@ -4035,8 +4156,106 @@ function renderAgentAdvancedHtml(a, idx) {
         </select>
       </div>
     </div>
+    ${renderAdapterHtml(agent.adapter, agent.wakeup, idx)}
     ${renderWakeupHtml(agent.wakeup, idx, agent.id || '')}
   </details>`;
+}
+
+function adapterFromWakeup(wu) {
+  const wakeup = wu || {};
+  if (!wakeup.url) return {type: 'manual', config: {}, auth: {}, response: {mode: 'manual', timeout_seconds: 180}};
+  return {
+    type: 'native_http',
+    config: {
+      url: wakeup.url || '',
+      method: wakeup.method || 'POST',
+      headers: wakeup.headers || {},
+    },
+    auth: wakeup.auth || {},
+    template: wakeup.body_template || {"message": "{{message}}"},
+    response: {mode: 'callback', timeout_seconds: 180},
+  };
+}
+
+function renderAdapterHtml(adapter, wakeup, idx) {
+  const data = adapter && adapter.type ? adapter : adapterFromWakeup(wakeup);
+  const type = data.type || 'manual';
+  const cfg = data.config || {};
+  const auth = data.auth || {};
+  const response = data.response || {};
+  const authType = auth.type === 'bearer' ? 'bearer' : 'none';
+  const responseMode = response.mode || (type === 'openclaw_sessions' ? 'callback' : 'callback');
+  const timeoutSeconds = response.timeout_seconds ?? 180;
+  const tokenPath = auth.token_path || '';
+  const tokenJsonpath = auth.token_jsonpath || '';
+  const tokenEnv = auth.token_env || '';
+  return `<div class="adapter-section" data-agent-idx="${idx}">
+    <div class="wakeup-label">Adapter V2</div>
+    <div class="wakeup-field">
+      <label>adapter.type</label>
+      <select class="ad-type" onchange="adapterTypeChange(this)">
+        <option value="manual" ${type==='manual'?'selected':''}>manual</option>
+        <option value="native_http" ${type==='native_http'?'selected':''}>native_http</option>
+        <option value="openclaw_sessions" ${type==='openclaw_sessions'?'selected':''}>openclaw_sessions</option>
+      </select>
+    </div>
+    <div class="adapter-fields ad-http-fields ${type==='manual'?'hidden':''}">
+      <div class="wakeup-field">
+        <label>adapter.config.url</label>
+        <input type="text" class="ad-url" value="${escAttr(cfg.url || '')}" placeholder="http://127.0.0.1:18789/tools/invoke" />
+      </div>
+      <div class="wakeup-field ad-openclaw-only ${type==='openclaw_sessions'?'':'hidden'}">
+        <label>adapter.config.sessions_key</label>
+        <input type="text" class="ad-sessions-key" value="${escAttr(cfg.sessions_key || cfg.sessionsKey || '')}" placeholder="agent:main:main" />
+      </div>
+      <div class="wakeup-field auth-section">
+        <label>adapter.auth</label>
+        <select class="ad-auth-type" onchange="authTypeChange(this)">
+          <option value="none" ${authType==='none'?'selected':''}>无</option>
+          <option value="bearer" ${authType==='bearer'?'selected':''}>Bearer Token</option>
+        </select>
+        <div class="auth-fields ${authType==='bearer'?'':'hidden'}">
+          <label style="font-size:0.72em;color:var(--text3);margin-top:4px;display:block">Token 文件路径</label>
+          <input type="text" class="ad-token-path" value="${escAttr(tokenPath)}" placeholder="~/.openclaw/openclaw.json" />
+          <label style="font-size:0.72em;color:var(--text3);margin-top:4px;display:block">JSONPath 提取</label>
+          <input type="text" class="ad-token-jsonpath" value="${escAttr(tokenJsonpath)}" placeholder="gateway.auth.token" />
+          <label style="font-size:0.72em;color:var(--text3);margin-top:4px;display:block">Token 环境变量</label>
+          <input type="text" class="ad-token-env" value="${escAttr(tokenEnv)}" placeholder="OPENCLAW_TOKEN" />
+        </div>
+      </div>
+      <div class="wakeup-field">
+        <label>adapter.response.mode</label>
+        <select class="ad-response-mode">
+          <option value="callback" ${responseMode==='callback'?'selected':''}>callback</option>
+          <option value="pull_session" ${responseMode==='pull_session'?'selected':''}>pull_session</option>
+          <option value="sync" ${responseMode==='sync'?'selected':''}>sync</option>
+          <option value="manual" ${responseMode==='manual'?'selected':''}>manual</option>
+        </select>
+      </div>
+      <div class="wakeup-field">
+        <label>adapter.response.timeout_seconds</label>
+        <input type="number" class="ad-timeout-seconds" value="${escAttr(timeoutSeconds)}" min="1" step="1" />
+      </div>
+    </div>
+  </div>`;
+}
+
+function adapterTypeChange(sel) {
+  const section = sel.closest('.adapter-section');
+  if (!section) return;
+  const type = sel.value;
+  const fields = section.querySelector('.ad-http-fields');
+  const openclaw = section.querySelector('.ad-openclaw-only');
+  if (fields) fields.classList.toggle('hidden', type === 'manual');
+  if (openclaw) openclaw.classList.toggle('hidden', type !== 'openclaw_sessions');
+  if (type === 'openclaw_sessions') {
+    const url = section.querySelector('.ad-url');
+    const sessionsKey = section.querySelector('.ad-sessions-key');
+    const mode = section.querySelector('.ad-response-mode');
+    if (url && !url.value.trim()) url.value = 'http://127.0.0.1:18789/tools/invoke';
+    if (sessionsKey && !sessionsKey.value.trim()) sessionsKey.value = 'agent:main:main';
+    if (mode) mode.value = 'callback';
+  }
 }
 
 function renderWakeupHtml(wu, idx, agentId='') {
@@ -4062,7 +4281,7 @@ function renderWakeupHtml(wu, idx, agentId='') {
 
   return `<div class="wakeup-section" data-agent-idx="${idx}">
     <div class="wakeup-label-row">
-      <div class="wakeup-label">唤醒配置</div>
+      <div class="wakeup-label">兼容 wakeup 配置</div>
       <button class="scan-btn test-agent-btn" onclick="testAgent(this)">测试对话</button>
     </div>
     <div class="wakeup-field">
@@ -4138,6 +4357,79 @@ function addHeader(btn, idx) {
   container.appendChild(row);
 }
 
+function collectAdapterData(container, wakeup) {
+  const section = container.querySelector('.adapter-section');
+  if (!section) return adapterFromWakeup(wakeup);
+  const type = section.querySelector('.ad-type')?.value || 'manual';
+  if (type === 'manual') return {type: 'manual', config: {}, auth: {}, response: {mode: 'manual', timeout_seconds: 180}};
+
+  const url = section.querySelector('.ad-url')?.value.trim() || '';
+  const authType = section.querySelector('.ad-auth-type')?.value || 'none';
+  const tokenPath = section.querySelector('.ad-token-path')?.value.trim() || '';
+  const tokenJsonpath = section.querySelector('.ad-token-jsonpath')?.value.trim() || '';
+  const tokenEnv = section.querySelector('.ad-token-env')?.value.trim() || '';
+  const responseMode = section.querySelector('.ad-response-mode')?.value || 'callback';
+  const timeoutRaw = section.querySelector('.ad-timeout-seconds')?.value || '180';
+  const timeoutSeconds = Math.max(1, parseInt(timeoutRaw, 10) || 180);
+  const auth = {};
+  if (authType === 'bearer' && tokenPath) {
+    auth.type = 'bearer';
+    auth.token_path = tokenPath;
+    if (tokenJsonpath) auth.token_jsonpath = tokenJsonpath;
+  } else if (authType === 'bearer' && tokenEnv) {
+    auth.type = 'bearer';
+    auth.token_env = tokenEnv;
+  }
+
+  if (type === 'openclaw_sessions') {
+    const sessionsKey = section.querySelector('.ad-sessions-key')?.value.trim() || '';
+    return {
+      type,
+      config: {url, sessions_key: sessionsKey, timeout: 60},
+      auth,
+      response: {mode: responseMode, timeout_seconds: timeoutSeconds},
+    };
+  }
+
+  return {
+    type: 'native_http',
+    config: {url, method: wakeup.method || 'POST', headers: wakeup.headers || {}},
+    auth,
+    template: wakeup.body_template || {"message": "{{message}}"},
+    response: {mode: responseMode, timeout_seconds: timeoutSeconds},
+  };
+}
+
+function wakeupForAdapter(adapter, fallbackWakeup) {
+  const type = adapter?.type || 'manual';
+  if (type === 'native_http') {
+    const cfg = adapter.config || {};
+    const wakeup = {
+      url: cfg.url || '',
+      method: cfg.method || fallbackWakeup.method || 'POST',
+      headers: cfg.headers || fallbackWakeup.headers || {"Content-Type": "application/json"},
+      body_template: adapter.template || fallbackWakeup.body_template || {"message": "{{message}}"},
+    };
+    if (adapter.auth && adapter.auth.type) wakeup.auth = adapter.auth;
+    return wakeup;
+  }
+  if (type === 'openclaw_sessions') {
+    const cfg = adapter.config || {};
+    const wakeup = {
+      url: cfg.url || '',
+      method: 'POST',
+      headers: {"Content-Type": "application/json"},
+      body_template: {
+        tool: "sessions_send",
+        args: {sessionKey: cfg.sessions_key || cfg.sessionsKey || '', message: "{{message}}"},
+      },
+    };
+    if (adapter.auth && adapter.auth.type) wakeup.auth = adapter.auth;
+    return wakeup;
+  }
+  return fallbackWakeup;
+}
+
 function collectAgentData(container) {
   const idx = container.dataset.agentIdx;
   const oldId = container.dataset.agentId || '';
@@ -4172,8 +4464,10 @@ function collectAgentData(container) {
   } else if (authType === 'bearer' && tokenEnv) {
     wakeup.auth = {type: 'bearer', token_env: tokenEnv};
   }
-  
-  const data = {id, display_name: displayName || id, color, cursor, filter_from: "", wakeup};
+
+  const adapter = collectAdapterData(container, wakeup);
+  const effectiveWakeup = wakeupForAdapter(adapter, wakeup);
+  const data = {id, display_name: displayName || id, color, cursor, filter_from: "", wakeup: effectiveWakeup, adapter};
   if (oldId && oldId !== id) data.old_id = oldId;
   return data;
 }
@@ -4469,6 +4763,15 @@ function validateAgentData(data) {
   if (!data.id) return 'Agent ID 不能为空';
   if (!VALID_ID_RE.test(data.id)) return `无效 ID: ${data.id}`;
   if (!/^#[0-9a-fA-F]{6}$/.test(data.color)) return `颜色格式错误: ${data.id}`;
+  const adapter = data.adapter || {};
+  const adapterType = adapter.type || 'manual';
+  const cfg = adapter.config || {};
+  if (adapterType === 'openclaw_sessions') {
+    if (!cfg.url) return `${data.id}: OpenClaw URL 不能为空`;
+    if (!cfg.sessions_key && !cfg.sessionsKey) return `${data.id}: sessions_key 不能为空`;
+  } else if (adapterType === 'native_http' && !cfg.url) {
+    return `${data.id}: Webhook URL 不能为空`;
+  }
   return '';
 }
 
