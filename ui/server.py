@@ -1629,6 +1629,42 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             msg = _classify_conn_error(detail, url)
             self.send_json({"ok": False, "error": msg, "raw": detail})
 
+    def _create_integration_test_room(self, cfg, config_path, shared, agent_id):
+        agent = cfg.get("agents", {}).get(agent_id, {})
+        display_name = (agent.get("display_name") or agent_id).strip()
+        room_id = f"test_{agent_id}_{uuid.uuid4().hex[:6]}"
+        room = normalize_room({
+            "id": room_id,
+            "name": f"{display_name} 临时测试聊天室",
+            "agents": [agent_id],
+            "order": [agent_id],
+            "policy": "round_robin",
+            "status": ROOM_RUNNING,
+            "max_turns": 50,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        cfg.setdefault("rooms", {})[room_id] = room
+        sync_filter_from(cfg)
+        ensure_room(shared, room)
+        state = read_room_state(shared, room_id, room)
+        state["status"] = ROOM_RUNNING
+        state["order"] = room["order"]
+        state["max_turns"] = room["max_turns"]
+        state["current_turn"] = None
+        state["waiting_for"] = ""
+        state["waiting_line"] = 0
+        state["last_error"] = ""
+        write_room_state(shared, room_id, state)
+        write_bridge(config_path, cfg)
+        append_room_log_safely(
+            shared,
+            room_id,
+            "room_created",
+            "联调用临时聊天室已创建",
+            meta={"agents": room["agents"], "order": room["order"], "temporary": True},
+        )
+        return room_id, room
+
     def handle_agent_integration_test(self):
         body, err = self._read_json_body()
         if err:
@@ -1655,8 +1691,14 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 room = item
                 break
         if not room_id or not room:
-            self.send_json({"ok": False, "error": "请先把该 Agent 加入一个聊天室"})
-            return
+            if not body.get("auto_create_room"):
+                self.send_json({
+                    "ok": False,
+                    "error": "请先把该 Agent 加入一个聊天室",
+                    "needs_room": True,
+                })
+                return
+            room_id, room = self._create_integration_test_room(cfg, config_path, shared, agent_id)
 
         room_cfg = normalize_room({**room, "id": room_id})
         state = read_room_state(shared, room_id, room_cfg)
@@ -1705,6 +1747,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 "room_id": room_id,
                 "agent_id": agent_id,
                 "message_id": msg.get("id", ""),
+                "room_created": bool(body.get("auto_create_room")),
                 "response_received": True,
                 "result": result,
             })
@@ -1717,6 +1760,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "room_id": room_id,
             "agent_id": agent_id,
             "message_id": msg.get("id", ""),
+            "room_created": bool(body.get("auto_create_room")),
             "turn_id": turn.get("turn_id", ""),
             "correlation_id": turn.get("correlation_id", ""),
             "result": result,
@@ -1851,8 +1895,11 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
 
     def send_json(self, data, status=200):
         text = json.dumps(data, ensure_ascii=False)
+        body = text.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         # 动态回显请求 Origin，仅允许可信的 localhost 来源
         origin = self.headers.get("Origin", "")
@@ -1860,7 +1907,8 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
         self.end_headers()
-        self.wfile.write(text.encode("utf-8"))
+        self.wfile.write(body)
+        self.wfile.flush()
 
     def log_message(self, fmt, *args):
         msg = fmt % args

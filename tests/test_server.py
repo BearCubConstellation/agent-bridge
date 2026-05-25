@@ -617,6 +617,44 @@ class TestRoomAPI(TestServerBase):
         self.assertFalse(data["ok"])
         self.assertIn("not in room", data["error"])
 
+    @patch("server.run_room_step")
+    def test_agent_integration_test_auto_creates_temp_room(self, mock_run_room_step):
+        self._put("/api/config/full", {
+            "shared_dir": str(self.tmpdir),
+            "agent_id": "alice",
+            "agents": [self._agent_payload("alice")],
+        })
+
+        status, data = self._post("/api/agent/integration-test", {
+            "agent_id": "alice",
+        })
+        self.assertEqual(status, 200)
+        self.assertFalse(data["ok"])
+        self.assertTrue(data.get("needs_room"))
+
+        mock_run_room_step.return_value = {
+            "ok": True,
+            "action": "sync_response",
+            "room_id": "dummy",
+        }
+
+        status, data = self._post("/api/agent/integration-test", {
+            "agent_id": "alice",
+            "auto_create_room": True,
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(data["ok"])
+        self.assertTrue(data["room_created"])
+        self.assertEqual(data["agent_id"], "alice")
+        self.assertTrue(data["room_id"].startswith("test_alice_"))
+
+        status, rooms = self._get("/api/rooms")
+        self.assertEqual(status, 200)
+        room = next(r for r in rooms["rooms"] if r["id"] == data["room_id"])
+        self.assertEqual(room["agents"], ["alice"])
+        self.assertEqual(room["order"], ["alice"])
+        self.assertEqual(room["status"], "running")
+
 
 class TestOpenCurrentFolderAPI(TestServerBase):
     """打开当前对话目录 API 绔偣銆?"""
