@@ -1302,15 +1302,58 @@ html[data-theme="dark"] .page-logo.logo-dark { display: block; }
   cursor: pointer;
 }
 .agent-color-control .ag-color { font-family: var(--font); font-size: 0.8em; }
-.advanced-agent-settings {
+.advanced-agent-settings,
+.developer-agent-settings {
   margin-top: var(--space-sm); border-top: 1px solid var(--border);
 }
-.advanced-agent-settings summary {
+.advanced-agent-settings summary,
+.developer-agent-settings summary {
   cursor: pointer; color: var(--text2); font-size: 0.76em;
   padding: 8px 0 2px; user-select: none;
 }
-.advanced-agent-settings summary:hover { color: var(--text); }
-.advanced-agent-settings .form-grid { margin-top: var(--space-xs); }
+.advanced-agent-settings summary:hover,
+.developer-agent-settings summary:hover { color: var(--text); }
+.advanced-agent-settings .form-grid,
+.developer-agent-settings .form-grid { margin-top: var(--space-xs); }
+.agent-simple-card {
+  display: grid;
+  gap: var(--space-xs);
+}
+.agent-summary {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--text2);
+  background: color-mix(in srgb, var(--surface2) 72%, transparent);
+  font-size: 0.78em;
+  line-height: 1.55;
+}
+.agent-summary.saved { color: var(--accent); }
+.openclaw-card {
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.openclaw-card.hidden { display: none; }
+.openclaw-card-title {
+  color: var(--text);
+  font-size: 0.82em;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.openclaw-card-meta {
+  color: var(--text3);
+  font-size: 0.72em;
+  line-height: 1.5;
+  margin-top: 6px;
+}
+.simple-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+}
 
 /* ═══ Wakeup Section ═══ */
 .wakeup-section { margin-top: var(--space-sm); padding-top: var(--space-sm); border-top: 1px solid var(--border); }
@@ -2848,7 +2891,7 @@ function getConfigIssues(data) {
     }
     if (adapterType === 'openclaw_sessions') {
       if (!adapterConfig.url) issues.push(`${name}: 填写 OpenClaw URL`);
-      if (!adapterConfig.sessions_key && !adapterConfig.sessionsKey) issues.push(`${name}: 填写 sessions_key`);
+      if (!adapterConfig.sessions_key && !adapterConfig.sessionsKey) issues.push(`${name}: 填写 OpenClaw 会话`);
     } else if (adapterType === 'native_http') {
       if (!adapterConfig.url && (!a.wakeup || !a.wakeup.url)) issues.push(`${name}: 填写 Webhook URL`);
       if (!a.wakeup || !a.wakeup.body_template) issues.push(`${name}: 确认消息体模板`);
@@ -2908,9 +2951,10 @@ function renderDiscoverAgents(agents, scannedAt) {
   el.innerHTML = `<div class="discover-grid">${normalized.map((a, idx) => {
     const status = a.configured ? '已配置' : (a.sample ? '示例' : '未配置');
     const statusClass = a.configured ? 'configured' : (a.sample ? 'sample' : '');
+    const isOpenClaw = a.adapter?.type === 'openclaw_sessions' || a.kind === 'OpenClaw';
     const addAction = a.configured
       ? '<button class="scan-btn" disabled>已在 agent-bridge</button>'
-      : `<button class="scan-btn" onclick="addDiscoveredAgent(${idx})">添加到 agent-bridge</button>`;
+      : `<button class="scan-btn" onclick="addDiscoveredAgent(${idx})">${isOpenClaw ? '添加 OpenClaw' : '添加到 agent-bridge'}</button>`;
     const openAction = discoverSourceDir(a)
       ? `<button class="scan-btn" onclick="openDiscoveredAgentDir(${idx})">打开目录</button>`
       : '';
@@ -2922,6 +2966,7 @@ function renderDiscoverAgents(agents, scannedAt) {
       </div>
       <div class="discover-meta">${esc(a.kind || 'Agent')} · ${esc(a.id)}</div>
       <div class="discover-meta">${esc(a.details || '')}</div>
+      ${isOpenClaw ? '<div class="discover-meta">将自动填好本地网关、认证和自动回写。</div>' : ''}
       <div class="discover-meta">${esc(a.source || '')}</div>
       <div class="discover-actions">${action}</div>
     </div>`;
@@ -3013,6 +3058,11 @@ function populateAgentCard(card, agent) {
   if (cursor) cursor.value = agent.cursor || 'line';
 
   const adapter = agent.adapter || adapterFromWakeup(agent.wakeup || {});
+  const simpleType = card.querySelector('.agent-type-select');
+  if (simpleType) {
+    simpleType.value = agentTypeFromAdapter(adapter, agent.wakeup || {});
+    agentTypeChange(simpleType);
+  }
   const adapterSection = card.querySelector('.adapter-section');
   if (adapterSection) {
     const type = adapter.type || 'manual';
@@ -3044,6 +3094,8 @@ function populateAgentCard(card, agent) {
     if (responseMode) responseMode.value = response.mode || (type === 'openclaw_sessions' ? 'callback' : 'callback');
     if (timeoutSeconds) timeoutSeconds.value = response.timeout_seconds ?? 180;
   }
+  const simpleSessionsKey = card.querySelector('.simple-sessions-key');
+  if (simpleSessionsKey) simpleSessionsKey.value = (adapter.config || {}).sessions_key || (adapter.config || {}).sessionsKey || 'agent:main:main';
 
   const wu = agent.wakeup || {};
   const section = card.querySelector('.wakeup-section');
@@ -3078,6 +3130,7 @@ function populateAgentCard(card, agent) {
   }
   const body = section.querySelector('.wu-body');
   if (body) body.value = bodyTemplateToText(wu.body_template || {"message": "{{message}}"});
+  updateAgentSummary(card);
 }
 
 function addDiscoveredAgent(index) {
@@ -3095,10 +3148,6 @@ function addDiscoveredAgent(index) {
   const cards = grid.querySelectorAll('.agent-config');
   const card = cards[cards.length - 1];
   populateAgentCard(card, {...agent, color: agent.color && agent.color !== '#8888a0' ? agent.color : randomAgentColor()});
-  if (agent.adapter?.type === 'openclaw_sessions') {
-    const details = card.querySelector('.advanced-agent-settings');
-    if (details) details.open = true;
-  }
   const status = $('#saveStatus');
   if (status) {
     status.textContent = '已添加到表单，请在该 Agent 卡片中保存配置';
@@ -4110,6 +4159,76 @@ function updateAgentColor(input) {
   }
 }
 
+function agentTypeFromAdapter(adapter, wakeup) {
+  const type = adapter?.type || (wakeup?.url ? 'native_http' : 'manual');
+  if (type === 'openclaw_sessions') return 'openclaw';
+  if (type === 'native_http') return 'http';
+  return 'manual';
+}
+
+function responseModeLabel(mode) {
+  if (mode === 'callback') return '自动回写';
+  if (mode === 'pull_session') return '读取会话';
+  if (mode === 'sync') return '同步返回';
+  return '手动记录';
+}
+
+function agentConfigSummary(agent) {
+  const adapter = agent.adapter || adapterFromWakeup(agent.wakeup || {});
+  const type = agentTypeFromAdapter(adapter, agent.wakeup || {});
+  const response = adapter.response || {};
+  if (type === 'openclaw') {
+    return `OpenClaw 将通过本地网关被唤醒，回复将${responseModeLabel(response.mode || 'callback')} Agent Bridge。`;
+  }
+  if (type === 'http') {
+    return `Webhook 将通过配置的地址被唤醒，回复将${responseModeLabel(response.mode || 'callback')} Agent Bridge。`;
+  }
+  return '该 Agent 需要手动处理消息，不会自动唤醒外部程序。';
+}
+
+function renderAgentSimpleFields(a) {
+  const agent = a || {};
+  const adapter = agent.adapter || adapterFromWakeup(agent.wakeup || {});
+  const cfg = adapter.config || {};
+  const type = agentTypeFromAdapter(adapter, agent.wakeup || {});
+  const sessionsKey = cfg.sessions_key || cfg.sessionsKey || 'agent:main:main';
+  const health = agent.capability?.health || agent.health || '';
+  const connected = health && health !== 'missing_config' && health !== 'manual';
+  const stateText = type === 'manual' ? '手动连接' : (connected ? '已配置' : '待确认');
+  return `<div class="agent-simple-card">
+    <div class="form-grid">
+      <div class="wakeup-field">
+        <label>显示名称</label>
+        <input type="text" class="ag-name" value="${escAttr(agent.display_name || agent.id || '')}" placeholder="例如 OpenClaw" />
+      </div>
+      <div class="wakeup-field">
+        <label>Agent 类型</label>
+        <select class="agent-type-select" onchange="agentTypeChange(this)">
+          <option value="openclaw" ${type==='openclaw'?'selected':''}>OpenClaw</option>
+          <option value="http" ${type==='http'?'selected':''}>Webhook</option>
+          <option value="manual" ${type==='manual'?'selected':''}>手动</option>
+        </select>
+      </div>
+      <div class="wakeup-field">
+        <label>连接状态</label>
+        <input type="text" class="agent-connection-state" value="${escAttr(stateText)}" readonly />
+      </div>
+    </div>
+    <div class="openclaw-card ${type==='openclaw'?'':'hidden'}">
+      <div class="openclaw-card-title">OpenClaw 配置</div>
+      <div class="wakeup-field">
+        <label>OpenClaw 会话</label>
+        <input type="text" class="simple-sessions-key" value="${escAttr(sessionsKey)}" placeholder="agent:main:main" oninput="syncSimpleSessionsKey(this)" />
+      </div>
+      <div class="openclaw-card-meta">已自动使用本地网关、认证文件和自动回写；通常只需要确认这个会话 Key。</div>
+    </div>
+    <div class="agent-summary">${esc(agentConfigSummary(agent))}</div>
+    <div class="simple-actions">
+      <button class="scan-btn test-agent-btn" onclick="testAgent(this)">测试连接</button>
+    </div>
+  </div>`;
+}
+
 function pickAgentColor(input) {
   const card = input.closest('.agent-config');
   const colorInput = card?.querySelector('.ag-color');
@@ -4127,10 +4246,6 @@ function renderAgentBaseFields(a) {
       <input type="text" class="ag-id" value="${escAttr(agent.id || '')}" placeholder="e.g. momo" oninput="updateAgentTokenPlaceholders(this.closest('.agent-config'))" />
     </div>
     <div class="wakeup-field">
-      <label>显示名称</label>
-      <input type="text" class="ag-name" value="${escAttr(agent.display_name || agent.id || '')}" placeholder="Display name" />
-    </div>
-    <div class="wakeup-field">
       <label>颜色</label>
       <div class="agent-color-control">
         <span class="color-preview" style="background:${color}"></span>
@@ -4144,15 +4259,19 @@ function renderAgentBaseFields(a) {
 function renderAgentAdvancedHtml(a, idx) {
   const agent = a || {};
   const adapterType = agent.adapter?.type || '';
-  const open = adapterType === 'openclaw_sessions' ? ' open' : '';
-  return `<details class="advanced-agent-settings"${open}>
-    <summary>更多设置</summary>
+  const devOpen = adapterType && adapterType !== 'openclaw_sessions' && adapterType !== 'manual' ? ' open' : '';
+  return `<details class="advanced-agent-settings">
+    <summary>高级设置</summary>
+    ${renderAgentBaseFields(agent)}
+  </details>
+  <details class="developer-agent-settings"${devOpen}>
+    <summary>开发者配置</summary>
     <div class="form-grid">
       <div class="wakeup-field">
         <label>游标类型</label>
         <select class="ag-cursor">
-          <option value="line" ${(agent.cursor||'line')==='line'?'selected':''}>line（行号）</option>
-          <option value="timestamp" ${agent.cursor==='timestamp'?'selected':''}>timestamp（时间戳）</option>
+          <option value="line" ${(agent.cursor||'line')==='line'?'selected':''}>按行记录</option>
+          <option value="timestamp" ${agent.cursor==='timestamp'?'selected':''}>按时间记录</option>
         </select>
       </div>
     </div>
@@ -4189,15 +4308,17 @@ function renderAdapterHtml(adapter, wakeup, idx) {
   const tokenPath = auth.token_path || '';
   const tokenJsonpath = auth.token_jsonpath || '';
   const tokenEnv = auth.token_env || '';
+  const typeControl = type === 'openclaw_sessions'
+    ? `<input type="hidden" class="ad-type" value="openclaw_sessions" /><input type="text" value="OpenClaw 专属连接" readonly />`
+    : `<select class="ad-type" onchange="adapterTypeChange(this)">
+        <option value="manual" ${type==='manual'?'selected':''}>手动</option>
+        <option value="native_http" ${type==='native_http'?'selected':''}>Webhook</option>
+      </select>`;
   return `<div class="adapter-section" data-agent-idx="${idx}">
-    <div class="wakeup-label">适配器 V2</div>
+    <div class="wakeup-label">底层适配配置</div>
     <div class="wakeup-field">
-      <label>适配器类型</label>
-      <select class="ad-type" onchange="adapterTypeChange(this)">
-        <option value="manual" ${type==='manual'?'selected':''}>manual</option>
-        <option value="native_http" ${type==='native_http'?'selected':''}>native_http</option>
-        <option value="openclaw_sessions" ${type==='openclaw_sessions'?'selected':''}>openclaw_sessions</option>
-      </select>
+      <label>连接方式</label>
+      ${typeControl}
     </div>
     <div class="adapter-fields ad-http-fields ${type==='manual'?'hidden':''}">
       <div class="wakeup-field">
@@ -4205,7 +4326,7 @@ function renderAdapterHtml(adapter, wakeup, idx) {
         <input type="text" class="ad-url" value="${escAttr(cfg.url || '')}" placeholder="http://127.0.0.1:18789/tools/invoke" />
       </div>
       <div class="wakeup-field ad-openclaw-only ${type==='openclaw_sessions'?'':'hidden'}">
-        <label>OpenClaw 会话 Key</label>
+        <label>OpenClaw 会话</label>
         <input type="text" class="ad-sessions-key" value="${escAttr(cfg.sessions_key || cfg.sessionsKey || '')}" placeholder="agent:main:main" />
       </div>
       <div class="wakeup-field auth-section">
@@ -4217,7 +4338,7 @@ function renderAdapterHtml(adapter, wakeup, idx) {
         <div class="auth-fields ${authType==='bearer'?'':'hidden'}">
           <label style="font-size:0.72em;color:var(--text3);margin-top:4px;display:block">Token 文件路径</label>
           <input type="text" class="ad-token-path" value="${escAttr(tokenPath)}" placeholder="~/.openclaw/openclaw.json" />
-          <label style="font-size:0.72em;color:var(--text3);margin-top:4px;display:block">JSONPath 提取</label>
+          <label style="font-size:0.72em;color:var(--text3);margin-top:4px;display:block">Token 自动提取路径</label>
           <input type="text" class="ad-token-jsonpath" value="${escAttr(tokenJsonpath)}" placeholder="gateway.auth.token" />
           <label style="font-size:0.72em;color:var(--text3);margin-top:4px;display:block">Token 环境变量</label>
           <input type="text" class="ad-token-env" value="${escAttr(tokenEnv)}" placeholder="OPENCLAW_TOKEN" />
@@ -4226,14 +4347,14 @@ function renderAdapterHtml(adapter, wakeup, idx) {
       <div class="wakeup-field">
         <label>回复接收方式</label>
         <select class="ad-response-mode">
-          <option value="callback" ${responseMode==='callback'?'selected':''}>callback</option>
-          <option value="pull_session" ${responseMode==='pull_session'?'selected':''}>pull_session</option>
-          <option value="sync" ${responseMode==='sync'?'selected':''}>sync</option>
-          <option value="manual" ${responseMode==='manual'?'selected':''}>manual</option>
+          <option value="callback" ${responseMode==='callback'?'selected':''}>自动回写</option>
+          <option value="pull_session" ${responseMode==='pull_session'?'selected':''}>读取会话</option>
+          <option value="sync" ${responseMode==='sync'?'selected':''}>同步返回</option>
+          <option value="manual" ${responseMode==='manual'?'selected':''}>手动记录</option>
         </select>
       </div>
       <div class="wakeup-field">
-        <label>回复超时秒数</label>
+        <label>等待回复超时</label>
         <input type="number" class="ad-timeout-seconds" value="${escAttr(timeoutSeconds)}" min="1" step="1" />
       </div>
     </div>
@@ -4256,6 +4377,60 @@ function adapterTypeChange(sel) {
     if (sessionsKey && !sessionsKey.value.trim()) sessionsKey.value = 'agent:main:main';
     if (mode) mode.value = 'callback';
   }
+}
+
+function ensureOpenClawDefaults(card) {
+  if (!card) return;
+  const adType = card.querySelector('.ad-type');
+  if (adType) adType.value = 'openclaw_sessions';
+  const fields = card.querySelector('.ad-http-fields');
+  if (fields) fields.classList.remove('hidden');
+  const openclaw = card.querySelector('.ad-openclaw-only');
+  if (openclaw) openclaw.classList.remove('hidden');
+  const url = card.querySelector('.ad-url');
+  if (url && !url.value.trim()) url.value = 'http://127.0.0.1:18789/tools/invoke';
+  const sessionsKey = card.querySelector('.ad-sessions-key');
+  const simpleKey = card.querySelector('.simple-sessions-key');
+  const key = simpleKey?.value.trim() || sessionsKey?.value.trim() || 'agent:main:main';
+  if (sessionsKey) sessionsKey.value = key;
+  if (simpleKey) simpleKey.value = key;
+  const mode = card.querySelector('.ad-response-mode');
+  if (mode) mode.value = 'callback';
+  const timeout = card.querySelector('.ad-timeout-seconds');
+  if (timeout && !timeout.value) timeout.value = '180';
+}
+
+function agentTypeChange(sel) {
+  const card = sel.closest('.agent-config');
+  if (!card) return;
+  const type = sel.value;
+  const openclaw = card.querySelector('.openclaw-card');
+  if (openclaw) openclaw.classList.toggle('hidden', type !== 'openclaw');
+  const state = card.querySelector('.agent-connection-state');
+  if (state) state.value = type === 'manual' ? '手动连接' : '待确认';
+  const adType = card.querySelector('.ad-type');
+  if (type === 'openclaw') {
+    ensureOpenClawDefaults(card);
+  } else if (adType) {
+    adType.value = type === 'http' ? 'native_http' : 'manual';
+    adapterTypeChange(adType);
+  }
+  updateAgentSummary(card);
+}
+
+function syncSimpleSessionsKey(input) {
+  const card = input.closest('.agent-config');
+  const target = card?.querySelector('.ad-sessions-key');
+  if (target) target.value = input.value;
+  updateAgentSummary(card);
+}
+
+function updateAgentSummary(card, saved=false) {
+  const summary = card?.querySelector('.agent-summary');
+  if (!summary) return;
+  const data = collectAgentData(card);
+  summary.textContent = agentConfigSummary(data);
+  summary.classList.toggle('saved', !!saved);
 }
 
 function renderWakeupHtml(wu, idx, agentId='') {
@@ -4360,10 +4535,13 @@ function addHeader(btn, idx) {
 function collectAdapterData(container, wakeup) {
   const section = container.querySelector('.adapter-section');
   if (!section) return adapterFromWakeup(wakeup);
-  const type = section.querySelector('.ad-type')?.value || 'manual';
+  const uiType = container.querySelector('.agent-type-select')?.value || '';
+  const type = uiType === 'openclaw'
+    ? 'openclaw_sessions'
+    : (uiType === 'http' ? 'native_http' : (uiType === 'manual' ? 'manual' : (section.querySelector('.ad-type')?.value || 'manual')));
   if (type === 'manual') return {type: 'manual', config: {}, auth: {}, response: {mode: 'manual', timeout_seconds: 180}};
 
-  const url = section.querySelector('.ad-url')?.value.trim() || '';
+  const url = section.querySelector('.ad-url')?.value.trim() || (type === 'openclaw_sessions' ? 'http://127.0.0.1:18789/tools/invoke' : '');
   const authType = section.querySelector('.ad-auth-type')?.value || 'none';
   const tokenPath = section.querySelector('.ad-token-path')?.value.trim() || '';
   const tokenJsonpath = section.querySelector('.ad-token-jsonpath')?.value.trim() || '';
@@ -4382,12 +4560,14 @@ function collectAdapterData(container, wakeup) {
   }
 
   if (type === 'openclaw_sessions') {
-    const sessionsKey = section.querySelector('.ad-sessions-key')?.value.trim() || '';
+    const sessionsKey = container.querySelector('.simple-sessions-key')?.value.trim()
+      || section.querySelector('.ad-sessions-key')?.value.trim()
+      || 'agent:main:main';
     return {
       type,
       config: {url, sessions_key: sessionsKey, timeout: 60},
       auth,
-      response: {mode: responseMode, timeout_seconds: timeoutSeconds},
+      response: {mode: 'callback', timeout_seconds: timeoutSeconds},
     };
   }
 
@@ -4479,7 +4659,7 @@ async function testAgent(btn) {
   card.querySelectorAll('.field-error').forEach(el => el.classList.remove('field-error'));
   const data = collectAgentData(card);
   if (!data.wakeup || !data.wakeup.url) {
-    toast('请先配置 Webhook URL', 'error');
+    toast('请先配置连接地址', 'error');
     const urlField = card.querySelector('.wu-url');
     if (urlField) {
       urlField.classList.add('field-error');
@@ -4507,12 +4687,16 @@ async function testAgent(btn) {
   const detail = modal.querySelector('.test-modal-detail');
 
   if (res && res.ok) {
+    const state = card.querySelector('.agent-connection-state');
+    if (state) state.value = '连接正常';
     icon.className = 'test-modal-icon success';
     icon.textContent = '✓';
     title.textContent = '连通成功';
     detail.className = 'test-modal-detail success';
     detail.textContent = agentName + ' 响应正常（' + (res.status || '') + '）';
   } else {
+    const state = card.querySelector('.agent-connection-state');
+    if (state) state.value = '连接失败';
     icon.className = 'test-modal-icon failure';
     icon.textContent = '✗';
     title.textContent = '连通失败';
@@ -4612,7 +4796,7 @@ function renderAgentConfig(data, area) {
           <button class="agent-card-btn agent-card-btn-delete" onclick="removeAgent(this)">删除</button>
         </div>
       </div>
-      ${renderAgentBaseFields(a)}
+      ${renderAgentSimpleFields(a)}
       ${renderAgentAdvancedHtml(a, i)}
       <span class="agent-card-status"></span>
     </div>`;
@@ -4705,7 +4889,7 @@ function addAgent() {
       <button class="agent-card-btn agent-card-btn-delete" onclick="removeAgent(this)">删除</button>
     </div>
   </div>
-  ${renderAgentBaseFields({color})}
+  ${renderAgentSimpleFields({color, adapter:{type:'manual', config:{}, auth:{}, response:{mode:'manual', timeout_seconds:180}}})}
   ${renderAgentAdvancedHtml({color, cursor:'line'}, idx)}
   <span class="agent-card-status"></span>`;
   
@@ -4768,7 +4952,7 @@ function validateAgentData(data) {
   const cfg = adapter.config || {};
   if (adapterType === 'openclaw_sessions') {
     if (!cfg.url) return `${data.id}: OpenClaw URL 不能为空`;
-    if (!cfg.sessions_key && !cfg.sessionsKey) return `${data.id}: sessions_key 不能为空`;
+    if (!cfg.sessions_key && !cfg.sessionsKey) return `${data.id}: OpenClaw 会话不能为空`;
   } else if (adapterType === 'native_http' && !cfg.url) {
     return `${data.id}: Webhook URL 不能为空`;
   }
@@ -4825,7 +5009,7 @@ async function saveVisibleAgentConfig(status) {
     }
     return {ok: false, error};
   }
-  return {ok: true};
+  return {ok: true, agents};
 }
 
 function buildAgentPayloadForCard(card) {
@@ -4866,10 +5050,12 @@ async function saveAgentCard(btn) {
   card.dataset.agentId = data.id;
   const label = card.querySelector('.agent-display-label');
   if (label) label.textContent = data.display_name || data.id;
-  setAgentCardStatus(card, '✓ 配置已保存', 'ok');
+  const summary = agentConfigSummary(data);
+  setAgentCardStatus(card, '配置已保存。' + summary, 'ok');
+  updateAgentSummary(card, true);
   await loadConfig();
   renderCachedDiscover();
-  setTimeout(() => setAgentCardStatus(card, '', ''), 3000);
+  setTimeout(() => setAgentCardStatus(card, '', ''), 5000);
 }
 
 async function saveFullConfig() {
@@ -4877,9 +5063,9 @@ async function saveFullConfig() {
   const result = await saveVisibleAgentConfig(status);
   if (result.ok) {
     if (status) {
-      status.textContent = '✓ 配置已保存';
+      status.textContent = '配置已保存。' + (result.agents || []).map(agentConfigSummary).slice(0, 1).join('');
       status.className = 'save-status ok';
-      setTimeout(() => { status.textContent = ''; }, 3000);
+      setTimeout(() => { status.textContent = ''; }, 5000);
     }
     await loadConfig();
     renderCachedDiscover();

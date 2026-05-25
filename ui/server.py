@@ -433,6 +433,10 @@ def discover_local_agents(shared_dir, include_bridge_config=True):
                 mode = oc_auth.get("mode", "")
                 if mode in ("token", "password"):
                     auth_cfg["token_jsonpath"] = f"gateway.auth.{mode}"
+                elif oc_auth.get("password"):
+                    auth_cfg["token_jsonpath"] = "gateway.auth.password"
+                elif oc_auth.get("token"):
+                    auth_cfg["token_jsonpath"] = "gateway.auth.token"
             except Exception:
                 pass
         if "token_jsonpath" not in auth_cfg:
