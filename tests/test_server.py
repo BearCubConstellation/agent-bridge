@@ -654,6 +654,7 @@ class TestRoomAPI(TestServerBase):
         self.assertEqual(room["agents"], ["alice"])
         self.assertEqual(room["order"], ["alice"])
         self.assertEqual(room["status"], "running")
+        self.assertTrue(room["temporary"])
 
 
 class TestOpenCurrentFolderAPI(TestServerBase):

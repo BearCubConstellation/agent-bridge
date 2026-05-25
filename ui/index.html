@@ -903,6 +903,11 @@ html[data-theme="dark"] .page-logo.logo-dark { display: block; }
   padding: 2px 8px; border-radius: var(--radius-pill);
   border: 1px solid var(--border); background: var(--surface2);
 }
+.room-temp-pill {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 30%, var(--border));
+  background: color-mix(in srgb, var(--amber) 10%, var(--surface2));
+}
 .room-card-actions {
   display: flex; align-items: center; gap: 8px; flex-shrink: 0;
 }
@@ -3421,6 +3426,7 @@ function normalizeRoomForFingerprint(room) {
     status: room.status || '',
     policy: room.policy || '',
     max_turns: room.max_turns ?? null,
+    temporary: !!room.temporary,
     agents: Array.isArray(room.agents) ? room.agents.slice() : [],
     order: Array.isArray(order) ? order.slice() : [],
   };
@@ -3492,10 +3498,11 @@ function renderRoomGrid(options = {}) {
     const running = room.status === 'running';
     const statusClass = running ? 'active' : (isReady ? 'ready' : 'waiting');
     const statusText = running ? '运行中' : (isReady ? '已就绪' : '等待 Agent');
+    const isTemporary = !!room.temporary;
     const runText = running ? '暂停' : '开始';
     html += `<div class="room-card ${statusClass}" data-room-id="${escAttr(room.id)}">
       <div class="room-card-header">
-        <div class="room-card-name">${esc(room.name || room.id)}</div>
+        <div class="room-card-name">${esc(room.name || room.id)}${isTemporary ? ' <span class="room-meta-pill room-temp-pill">测试房间</span>' : ''}</div>
         <span class="room-status ${statusClass}">${statusText}</span>
       </div>
       <div class="room-card-agents">${renderAgentSlots(room)}</div>
@@ -3504,7 +3511,7 @@ function renderRoomGrid(options = {}) {
           <button class="room-card-action enter" onclick="event.stopPropagation(); openRoomConversation('${escAttr(room.id)}')">进入房间</button>
           <button class="room-card-action primary" onclick="event.stopPropagation(); setRoomRunning('${escAttr(room.id)}', ${running ? 'false' : 'true'})">${runText}</button>
         </div>
-        <button class="room-card-action danger room-del-btn" onclick="event.stopPropagation(); deleteRoom('${escAttr(room.id)}')" title="删除聊天室">删除</button>
+        <button class="room-card-action danger room-del-btn" onclick="event.stopPropagation(); ${isTemporary ? `cleanupTestRoom('${escAttr(room.id)}')` : `deleteRoom('${escAttr(room.id)}')`}" title="${isTemporary ? '清理测试房间' : '删除聊天室'}">${isTemporary ? '清理' : '删除'}</button>
       </div>
     </div>`;
   }
@@ -3689,6 +3696,33 @@ async function deleteRoom(roomId) {
     await loadConfig();
   } else {
     toast(result?.error || '删除失败', 'error');
+  }
+}
+
+async function cleanupTestRoom(roomId) {
+  const room = state.rooms.find(r => r.id === roomId);
+  const roomName = room?.name || roomId;
+  const ok = await confirmDialog({
+    title: '清理测试房间',
+    message: `确认清理测试房间「${roomName}」？这会移除该临时测试聊天室。`,
+    confirmText: '清理房间',
+  });
+  if (!ok) return;
+  if (room?.status === 'running') {
+    const pauseResult = await apiPost(`/api/rooms/${encodeURIComponent(roomId)}/pause`, {});
+    if (!pauseResult || !pauseResult.ok) {
+      toast(pauseResult?.error || '暂停测试房间失败', 'error');
+      return;
+    }
+  }
+  const result = await apiPost('/api/rooms/delete', { id: roomId });
+  if (result && result.ok) {
+    if (state.currentRoomId === roomId) showRoomGrid();
+    await loadRooms();
+    await loadConfig();
+    toast('测试房间已清理', 'ok');
+  } else {
+    toast(result?.error || '清理失败', 'error');
   }
 }
 

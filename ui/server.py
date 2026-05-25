@@ -814,6 +814,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         for key, r in cfg.get("rooms", {}).items():
             room = normalize_room({**r, "id": r.get("id", key)})
             state = read_room_state(shared, room["id"], room)
+            meta = room.get("meta") or {}
             rooms_list.append({
                 "id": room["id"],
                 "name": room.get("name", ""),
@@ -824,6 +825,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 "state": state,
                 "max_turns": room.get("max_turns", 50),
                 "created_at": room.get("created_at", ""),
+                "temporary": bool(meta.get("temporary")),
             })
         self.send_json({
             "ok": True,
@@ -1058,6 +1060,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         for key, r in cfg.get("rooms", {}).items():
             room = normalize_room({**r, "id": r.get("id", key)})
             state = read_room_state(shared, room["id"], room)
+            meta = room.get("meta") or {}
             rooms_list.append({
                 "id": room["id"],
                 "name": room.get("name", ""),
@@ -1068,6 +1071,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
                 "state": state,
                 "max_turns": room.get("max_turns", 50),
                 "created_at": room.get("created_at", ""),
+                "temporary": bool(meta.get("temporary")),
             })
         agents_brief = [
             {"id": a["id"], "display_name": a.get("display_name", a["id"]),
@@ -1143,6 +1147,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "status": room_status,
             "max_turns": max_turns,
             "created_at": existing.get("created_at", now),
+            "meta": existing.get("meta", {}),
         })
         cfg.setdefault("rooms", {})[room_id] = room
 
@@ -1642,6 +1647,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "status": ROOM_RUNNING,
             "max_turns": 50,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "meta": {"temporary": True},
         })
         cfg.setdefault("rooms", {})[room_id] = room
         sync_filter_from(cfg)
