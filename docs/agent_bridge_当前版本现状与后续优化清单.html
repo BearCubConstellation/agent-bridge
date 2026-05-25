@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Bridge 当前版本现状与后续优化清单</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #161922;
+    --surface2: #1c1f2e;
+    --border: #2a2d3e;
+    --text: #e1e4ed;
+    --text2: #8b8fa3;
+    --accent: #6c8cff;
+    --accent2: #4f6bef;
+    --green: #34d399;
+    --green-bg: rgba(52,211,153,.1);
+    --yellow: #fbbf24;
+    --yellow-bg: rgba(251,191,36,.1);
+    --red: #f87171;
+    --red-bg: rgba(248,113,113,.1);
+    --blue: #60a5fa;
+    --blue-bg: rgba(96,165,250,.1);
+    --purple: #a78bfa;
+    --purple-bg: rgba(167,139,250,.1);
+    --orange: #fb923c;
+    --orange-bg: rgba(251,146,60,.1);
+    --code-bg: #1a1d2e;
+    --sidebar-w: 260px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 15px;
+  }
+  ::selection { background: var(--accent); color: #fff; }
+
+  /* Sidebar */
+  .sidebar {
+    position: fixed; left: 0; top: 0; bottom: 0;
+    width: var(--sidebar-w);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 24px 0;
+    overflow-y: auto;
+    z-index: 100;
+  }
+  .sidebar-title {
+    padding: 0 20px 20px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar a {
+    display: block;
+    padding: 8px 20px;
+    color: var(--text2);
+    text-decoration: none;
+    font-size: 13.5px;
+    border-left: 3px solid transparent;
+    transition: all .2s;
+  }
+  .sidebar a:hover, .sidebar a.active {
+    color: var(--text);
+    background: var(--surface2);
+    border-left-color: var(--accent);
+  }
+  .sidebar .nav-group {
+    padding: 6px 20px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text2);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 8px;
+  }
+
+  /* Main */
+  .main {
+    margin-left: var(--sidebar-w);
+    max-width: 960px;
+    padding: 48px 48px 120px;
+  }
+
+  /* Header */
+  .doc-header {
+    margin-bottom: 48px;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--border);
+  }
+  .doc-header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 16px;
+  }
+  .doc-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .doc-meta .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+  .tag-branch { background: var(--blue-bg); color: var(--blue); }
+  .tag-status { background: var(--green-bg); color: var(--green); }
+  .doc-desc {
+    color: var(--text2);
+    font-size: 14px;
+    line-height: 1.8;
+  }
+
+  /* Section */
+  .section {
+    margin-bottom: 56px;
+    scroll-margin-top: 24px;
+  }
+  .section h2 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--accent);
+    display: inline-block;
+  }
+
+  /* Sub-section */
+  .subsection {
+    margin-bottom: 40px;
+    scroll-margin-top: 24px;
+  }
+  .subsection h3 {
+    font-size: 17px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .subsection h3 .num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    background: var(--accent);
+    color: #fff;
+    flex-shrink: 0;
+  }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+  }
+  .card-green { border-left: 4px solid var(--green); }
+  .card-yellow { border-left: 4px solid var(--yellow); }
+  .card-red { border-left: 4px solid var(--red); }
+  .card-blue { border-left: 4px solid var(--blue); }
+  .card-purple { border-left: 4px solid var(--purple); }
+  .card-orange { border-left: 4px solid var(--orange); }
+
+  /* Status badge */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: .3px;
+  }
+  .badge-done { background: var(--green-bg); color: var(--green); }
+  .badge-todo { background: var(--yellow-bg); color: var(--yellow); }
+  .badge-risk { background: var(--red-bg); color: var(--red); }
+  .badge-p0 { background: var(--red-bg); color: var(--red); }
+  .badge-p1 { background: var(--orange-bg); color: var(--orange); }
+  .badge-p2 { background: var(--blue-bg); color: var(--blue); }
+  .badge-p3 { background: var(--purple-bg); color: var(--purple); }
+
+  /* Lists */
+  .check-list {
+    list-style: none;
+    display: grid;
+    gap: 6px;
+  }
+  .check-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 6px 0;
+    font-size: 14px;
+  }
+  .check-list .icon {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    margin-top: 2px;
+  }
+  .icon-check { color: var(--green); }
+  .icon-pending { color: var(--yellow); }
+  .icon-warn { color: var(--red); }
+
+  /* Code block */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    overflow-x: auto;
+    color: var(--text);
+    margin: 12px 0;
+  }
+  code {
+    font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+    font-size: 13px;
+  }
+  .inline-code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: var(--accent);
+  }
+
+  /* Priority sections */
+  .priority-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .priority-header h3 {
+    font-size: 18px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .priority-tag {
+    padding: 4px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+  }
+  .priority-a { background: var(--red-bg); color: var(--red); }
+  .priority-b { background: var(--orange-bg); color: var(--orange); }
+  .priority-c { background: var(--purple-bg); color: var(--purple); }
+
+  /* Architecture diagram */
+  .arch-diagram {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin: 16px 0;
+    overflow-x: auto;
+  }
+  .arch-diagram pre {
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+  }
+
+  /* Priority matrix */
+  .matrix {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .matrix-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+  }
+  .matrix-item h4 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .matrix-item ol {
+    padding-left: 20px;
+    color: var(--text2);
+    font-size: 13.5px;
+  }
+  .matrix-item ol li { margin-bottom: 4px; }
+
+  /* Validation list */
+  .validation-grid {
+    display: grid;
+    gap: 16px;
+  }
+  .validation-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+  }
+  .validation-card h4 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  /* Flow steps */
+  .flow-steps {
+    counter-reset: step;
+    list-style: none;
+    padding: 0;
+  }
+  .flow-steps li {
+    counter-increment: step;
+    position: relative;
+    padding: 10px 0 10px 44px;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .flow-steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 10px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .flow-steps li:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    left: 13px;
+    top: 40px;
+    bottom: -6px;
+    width: 2px;
+    background: var(--border);
+  }
+
+  /* Conclusion */
+  .conclusion {
+    background: linear-gradient(135deg, var(--surface), var(--surface2));
+    border: 1px solid var(--accent);
+    border-radius: 16px;
+    padding: 32px;
+    text-align: center;
+  }
+  .conclusion h2 {
+    border: none;
+    display: block;
+    margin-bottom: 16px;
+  }
+  .conclusion p {
+    color: var(--text2);
+    font-size: 15px;
+    max-width: 640px;
+    margin: 0 auto;
+    line-height: 1.8;
+  }
+  .conclusion .highlight {
+    color: var(--green);
+    font-weight: 600;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text2); }
+
+  /* Mobile */
+  .menu-toggle {
+    display: none;
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 200;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 18px;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+  }
+  @media (max-width: 900px) {
+    .sidebar { transform: translateX(-100%); transition: transform .3s; }
+    .sidebar.open { transform: translateX(0); }
+    .main { margin-left: 0; padding: 60px 20px 80px; }
+    .menu-toggle { display: flex; }
+  }
+
+  /* Back to top */
+  .back-top {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity .3s;
+    z-index: 100;
+  }
+  .back-top.visible { opacity: 1; }
+</style>
+</head>
+<body>
+
+<button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')" aria-label="菜单">&#9776;</button>
+
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-title">文档导航</div>
+  <a href="#summary">1. 总体结论</a>
+  <a href="#architecture">2. 系统架构概览</a>
+  <div class="nav-group">已完成能力</div>
+  <a href="#adapter-v2">3.1 Adapter V2</a>
+  <a href="#runtime-v2">3.2 Runtime V2</a>
+  <a href="#eventbus">3.3 EventBus</a>
+  <a href="#scheduler">3.4 Scheduler</a>
+  <a href="#callback">3.5 Callback</a>
+  <a href="#mcp">3.6 MCP Server</a>
+  <a href="#skill">3.7 Agent Skill</a>
+  <a href="#ui">3.8 UI 产品化</a>
+  <a href="#test-conn">3.9 测试连接</a>
+  <a href="#test-room">3.10 测试聊天室</a>
+  <div class="nav-group">联调与清单</div>
+  <a href="#flow">4. 推荐联调流程</a>
+  <a href="#todo-a">A. 高优先级清单</a>
+  <a href="#todo-b">B. 中优先级清单</a>
+  <a href="#todo-c">C. 低优先级清单</a>
+  <div class="nav-group">风险与优先级</div>
+  <a href="#risks">6. 风险点</a>
+  <a href="#priority">7. 开发优先级</a>
+  <a href="#validation">8. 验收清单</a>
+  <a href="#next">9. 下一步任务</a>
+  <a href="#final">10. 最终评价</a>
+</nav>
+
+<div class="main">
+
+<!-- Header -->
+<header class="doc-header" id="top">
+  <h1>Agent Bridge 当前版本现状与后续优化清单</h1>
+  <div class="doc-meta">
+    <span class="tag tag-branch">分支：dev</span>
+    <span class="tag tag-status">状态：架构升级完成，待联调验证</span>
+  </div>
+  <p class="doc-desc">
+    Agent Bridge 已从"文件轮询 + 单向投递"的早期形态，升级为<strong style="color:var(--accent)">事件驱动 + Runtime V2 + Adapter V2 + Callback/MCP 回写 + 产品化 UI 联调</strong>的轻量级多 Agent 聊天室系统。
+  </p>
+</header>
+
+<!-- Section 1 -->
+<section class="section" id="summary">
+  <h2>1. 当前版本总体结论</h2>
+
+  <div class="card card-green">
+    <h3 style="font-size:15px;font-weight:600;color:var(--green);margin-bottom:12px;">已完成的关键能力</h3>
+    <ul class="check-list">
+      <li><span class="icon icon-check">&#10003;</span> Adapter V2 抽象已建立</li>
+      <li><span class="icon icon-check">&#10003;</span> Room Runtime V2 状态机已建立</li>
+      <li><span class="icon icon-check">&#10003;</span> EventBus / events.jsonl 已建立</li>
+      <li><span class="icon icon-check">&#10003;</span> Scheduler 已成为 V2 主驱动</li>
+      <li><span class="icon icon-check">&#10003;</span> Callback 回写链路已建立</li>
+      <li><span class="icon icon-check">&#10003;</span> MCP Server 原型已建立</li>
+      <li><span class="icon icon-check">&#10003;</span> Agent Skill 文档已建立</li>
+      <li><span class="icon icon-check">&#10003;</span> OpenClaw 专用 adapter 已建立</li>
+      <li><span class="icon icon-check">&#10003;</span> UI 已支持普通用户友好的 Agent 配置与联调流程</li>
+      <li><span class="icon icon-check">&#10003;</span> 自动测试聊天室、测试房间标识和清理入口已建立</li>
+    </ul>
+  </div>
+
+  <div class="card card-yellow" style="margin-top:16px;">
+    <h3 style="font-size:15px;font-weight:600;color:var(--yellow);margin-bottom:12px;">当前阶段定位</h3>
+    <p style="color:var(--text2);font-size:14px;">当前版本已完成一轮比较系统的架构升级，但仍处于<strong style="color:var(--yellow)">可实机联调 / 合并前最后验证 / 产品体验继续打磨</strong>阶段，还不建议完全视为最终稳定版。</p>
+  </div>
+
+  <div class="card card-blue" style="margin-top:16px;">
+    <h3 style="font-size:15px;font-weight:600;color:var(--blue);margin-bottom:12px;">后续仍需重点完成</h3>
+    <ul class="check-list">
+      <li><span class="icon icon-pending">&#9711;</span> OpenClaw 真机 callback / MCP reply_turn 链路验证</li>
+      <li><span class="icon icon-pending">&#9711;</span> MCP Server 与真实 MCP Client 的兼容性验证</li>
+      <li><span class="icon icon-pending">&#9711;</span> 测试房间删除的后端原子化能力</li>
+      <li><span class="icon icon-pending">&#9711;</span> Adapter V2 的更多 Agent 类型实测</li>
+      <li><span class="icon icon-pending">&#9711;</span> UI 联调状态展示继续增强</li>
+      <li><span class="icon icon-pending">&#9711;</span> 文档和安装流程补齐 dev &rarr; main 的发布准备</li>
+    </ul>
+  </div>
+</section>
+
+<!-- Section 2 -->
+<section class="section" id="architecture">
+  <h2>2. 当前系统架构概览</h2>
+
+  <div class="arch-diagram">
+<pre>┌──────────────────────────────────────────────┐
+│                 Web UI / CLI                  │
+│  &bull; Agent 配置  &bull; Room 管理  &bull; 测试连接  │
+└──────────────────────┬───────────────────────┘
+                       │
+┌──────────────────────▼───────────────────────┐
+│                UI Server / API                │
+│  /api/config/full &bull; /api/agent/test        │
+│  /api/rooms/{room}/send &bull; /callback        │
+│  /api/rooms/{room}/events &bull; /turn          │
+└──────────────────────┬───────────────────────┘
+                       │
+┌──────────────────────▼───────────────────────┐
+│                 EventBus                      │
+│  events.jsonl &bull; message.created            │
+│  agent.wakeup.* &bull; turn.completed/timeout  │
+└──────────────────────┬───────────────────────┘
+                       │
+┌──────────────────────▼───────────────────────┐
+│                Scheduler                      │
+│  schedule_room &bull; scan_running_rooms        │
+│  worker loop                                  │
+└──────────────────────┬───────────────────────┘
+                       │
+┌──────────────────────▼───────────────────────┐
+│              Room Runtime V2                  │
+│  current_turn &bull; turn_id &bull; correlation_id │
+│  waiting_response &bull; timeout / retry / skip │
+└──────────────────────┬───────────────────────┘
+                       │
+┌──────────────────────▼───────────────────────┐
+│              Adapter V2 Layer                 │
+│  openclaw_sessions &bull; native_http &bull; cli  │
+│  file_mailbox &bull; mcp_tool &bull; manual        │
+└──────────────────────────────────────────────┘</pre>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+    <div class="card card-purple">
+      <h4 style="font-size:14px;font-weight:600;color:var(--purple);margin-bottom:8px;">MCP Server</h4>
+      <ul class="check-list" style="font-size:13px;">
+        <li><span class="icon icon-check" style="font-size:10px;">&bull;</span> agent_bridge.reply_turn</li>
+        <li><span class="icon icon-check" style="font-size:10px;">&bull;</span> agent_bridge.send_message</li>
+        <li><span class="icon icon-check" style="font-size:10px;">&bull;</span> agent_bridge.read_messages</li>
+        <li><span class="icon icon-check" style="font-size:10px;">&bull;</span> agent_bridge.get_current_turn</li>
+      </ul>
+    </div>
+    <div class="card card-blue">
+      <h4 style="font-size:14px;font-weight:600;color:var(--blue);margin-bottom:8px;">Agent Skill</h4>
+      <ul class="check-list" style="font-size:13px;">
+        <li><span class="icon icon-check" style="font-size:10px;">&bull;</span> agent-bridge-room-participant/SKILL.md</li>
+        <li><span class="icon icon-check" style="font-size:10px;">&bull;</span> 告诉 Agent 如何参与 room、如何 callback/MCP 写回</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- Section 3 -->
+<section class="section">
+  <h2>3. 当前已完成能力</h2>
+
+  <div class="subsection" id="adapter-v2">
+    <h3><span class="num">3.1</span> Adapter V2 基础抽象 <span class="badge badge-done">已完成</span></h3>
+    <div class="card card-green">
+      <p style="color:var(--text2);font-size:14px;margin-bottom:12px;">已将原来的 <code class="inline-code">core/adapters.py</code> 拆分为 <code class="inline-code">core/adapters/</code> 目录，支持多种 adapter 类型：</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+        <code class="inline-code">manual</code>
+        <code class="inline-code">native_http</code>
+        <code class="inline-code">openclaw_sessions</code>
+        <code class="inline-code">cli</code>
+        <code class="inline-code">file_mailbox</code>
+        <code class="inline-code">mcp_tool</code>
+      </div>
+      <p style="color:var(--text2);font-size:14px;">核心目标：不再依赖旧 wakeup 三元组，能区分不同 Agent 的唤醒方式和回复模式，支持 DeliveryRequest / DeliveryTicket、response.mode、capability 声明，兼容 legacy wakeup。</p>
+    </div>
+  </div>
+
+  <div class="subsection" id="runtime-v2">
+    <h3><span class="num">3.2</span> Room Runtime V2 状态机 <span class="badge badge-done">已完成</span></h3>
+    <div class="card card-green">
+      <p style="color:var(--text2);font-size:14px;margin-bottom:12px;">引入 Runtime V2 状态机，核心状态由 <code class="inline-code">state.json</code> 中的 <code class="inline-code">current_turn</code> 表达。</p>
+      <pre><code>{
+  "status": "running",
+  "current_turn": {
+    "turn_id": "turn_xxx",
+    "agent_id": "openclaw",
+    "state": "waiting_response",
+    "correlation_id": "corr_xxx",
+    "started_at": "2026-xx-xx xx:xx:xx",
+    "timeout_at": "2026-xx-xx xx:xx:xx"
+  }
+}</code></pre>
+      <p style="color:var(--text2);font-size:14px;">支持：选择发言 Agent、读取 pending messages、调用 Adapter V2 唤醒、区分 sync/async response、写入 current_turn、等待回写、推进 turn、timeout 检测、legacy 兼容。</p>
+    </div>
+  </div>
+
+  <div class="subsection" id="eventbus">
+    <h3><span class="num">3.3</span> EventBus 事件系统 <span class="badge badge-done">已完成</span></h3>
+    <div class="card card-green">
+      <p style="color:var(--text2);font-size:14px;margin-bottom:12px;">新增 <code class="inline-code">events.jsonl</code> 作为系统事件日志，替代了对 <code class="inline-code">runtime.log</code> 和 <code class="inline-code">active.jsonl</code> 的隐式依赖。</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        <code class="inline-code">message.created</code>
+        <code class="inline-code">agent.wakeup.requested</code>
+        <code class="inline-code">agent.wakeup.succeeded</code>
+        <code class="inline-code">agent.wakeup.failed</code>
+        <code class="inline-code">agent.response.received</code>
+        <code class="inline-code">turn.completed</code>
+        <code class="inline-code">turn.timeout</code>
+        <code class="inline-code">room.started</code>
+        <code class="inline-code">room.paused</code>
+        <code class="inline-code">room.error</code>
+      </div>
+    </div>
+  </div>
+
+  <div class="subsection" id="scheduler">
+    <h3><span class="num">3.4</span> Scheduler 主驱动 <span class="badge badge-done">已完成</span></h3>
+    <div class="card card-green">
+      <p style="color:var(--text2);font-size:14px;">补齐 <code class="inline-code">core/scheduler.py</code>，服务启动时启动 Scheduler，每次 _schedule_room 刷新 config，PollManager 在 V2 模式下降级为 fallback scan，解决了旧 tick_room 和新 Runtime V2 双驱动的风险。</p>
+    </div>
+  </div>
+
+  <div class="subsection" id="callback">
+    <h3><span class="num">3.5</span> Callback 回写链路 <span class="badge badge-done">已完成</span></h3>
+    <div class="card card-green">
+      <p style="color:var(--text2);font-size:14px;margin-bottom:12px;">新增 Agent 回写入口：<code class="inline-code">POST /api/rooms/{room_id}/agents/{agent_id}/callback</code></p>
+      <pre><code>{
+  "turn_id": "turn_xxx",
+  "correlation_id": "corr_xxx",
+  "message": "Agent 的最终回复",
+  "meta": {}
+}</code></pre>
+      <p style="color:var(--text2);font-size:14px;">完整链路：校验 room/agent/turn &rarr; append_room_message &rarr; 写入 reply_to/correlation_id &rarr; emit agent.response.received &rarr; schedule 下一轮。解决了 Agent 被唤醒后无统一回写路径导致 waiting_response 死等的核心问题。</p>
+    </div>
+  </div>
+
+  <div class="subsection" id="mcp">
+    <h3><span class="num">3.6</span> MCP Server 原型 <span class="badge badge-done">已完成</span></h3>
+    <div class="card card-green">
+      <p style="color:var(--text2);font-size:14px;margin-bottom:12px;">新增 <code class="inline-code">core/mcp_server.py</code>，已设计的 MCP 工具：</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        <code class="inline-code">agent_bridge.list_rooms</code>
+        <code class="inline-code">agent_bridge.get_current_turn</code>
+        <code class="inline-code">agent_bridge.read_messages</code>
+        <code class="inline-code">agent_bridge.get_agent_pending</code>
+        <code class="inline-code">agent_bridge.reply_turn</code>
+        <code class="inline-code">agent_bridge.send_message</code>
+      </div>
+      <p style="color:var(--yellow);font-size:13px;margin-top:12px;">注意：当前为自实现 stdio JSON-RPC MCP-like server，后续仍需使用真实 MCP client 做兼容性验证。</p>
+    </div>
+  </div>
+
+  <div class="subsection" id="skill">
+    <h3><span class="num">3.7</span> Agent Skill 文档 <span class="badge badge-done">已完成</span></h3>
+    <div class="card card-green">
+      <p style="color:var(--text2);font-size:14px;">新增 <code class="inline-code">core/skills/agent-bridge-room-participant/SKILL.md</code>，约束 Agent 行为：必须通过 MCP reply_turn 或 HTTP callback 写回 Agent Bridge，必须携带 turn_id 和 correlation_id，不能伪造身份或直接修改 active.jsonl。</p>
+    </div>
+  </div>
+
+  <div class="subsection" id="ui">
+    <h3><span class="num">3.8</span> UI 产品化改造 <span class="badge badge-done">已完成</span></h3>
+    <div class="card card-green">
+      <p style="color:var(--text2);font-size:14px;margin-bottom:12px;">UI 从"开发者调试配置面板"进化为更适合普通用户操作的产品界面。</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div>
+          <h4 style="font-size:13px;color:var(--green);margin-bottom:6px;">面向用户</h4>
+          <ul style="list-style:disc;padding-left:18px;color:var(--text2);font-size:13px;">
+            <li>Agent 简洁配置卡片</li>
+            <li>显示名称 / 唯一标识</li>
+            <li>Agent 类型选择</li>
+            <li>连接状态</li>
+            <li>测试连接 / 发送测试消息</li>
+            <li>保存后的下一步提示</li>
+          </ul>
+        </div>
+        <div>
+          <h4 style="font-size:13px;color:var(--text2);margin-bottom:6px;">折叠至高级</h4>
+          <ul style="list-style:disc;padding-left:18px;color:var(--text2);font-size:13px;">
+            <li>高级设置</li>
+            <li>开发者配置</li>
+            <li>Adapter 参数</li>
+            <li>Auth 配置</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="subsection" id="test-conn">
+    <h3><span class="num">3.9</span> 测试连接与完整联调区分 <span class="badge badge-done">已完成</span></h3>
+    <div class="card card-green">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div style="padding:12px;background:var(--blue-bg);border-radius:8px;">
+          <h4 style="font-size:13px;color:var(--blue);margin-bottom:6px;">测试连接</h4>
+          <p style="color:var(--text2);font-size:13px;">只验证 OpenClaw Gateway / Webhook 地址是否可达。成功不代表 callback 已完成。</p>
+        </div>
+        <div style="padding:12px;background:var(--green-bg);border-radius:8px;">
+          <h4 style="font-size:13px;color:var(--green);margin-bottom:6px;">发送测试消息</h4>
+          <p style="color:var(--text2);font-size:13px;">走 Runtime V2，写入测试消息，唤醒目标 Agent，等待 callback / sync_response。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="subsection" id="test-room">
+    <h3><span class="num">3.10</span> 自动测试聊天室 <span class="badge badge-done">已完成</span></h3>
+    <div class="card card-green">
+      <p style="color:var(--text2);font-size:14px;">当 Agent 未加入任何 room 时，点击"发送测试消息"可自动创建临时测试聊天室 <code class="inline-code">test_{agent_id}_{random}</code>，标记为 <code class="inline-code">meta.temporary</code>，UI 显示"测试房间"并提供"清理"按钮（先暂停再删除）。</p>
+    </div>
+  </div>
+</section>
+
+<!-- Section 4 -->
+<section class="section" id="flow">
+  <h2>4. 推荐的真实联调流程</h2>
+
+  <div class="card card-blue" style="margin-bottom:20px;">
+    <h4 style="font-size:14px;font-weight:600;color:var(--blue);margin-bottom:10px;">安装 / 启动</h4>
+    <pre><code>git checkout dev && git pull
+bridge start
+# 或开发模式: python cli/bridge start
+# 打开 http://127.0.0.1:7899</code></pre>
+  </div>
+
+  <div class="card card-green">
+    <h4 style="font-size:14px;font-weight:600;color:var(--green);margin-bottom:14px;">OpenClaw 联调步骤</h4>
+    <ol class="flow-steps">
+      <li>打开 Agent 页面</li>
+      <li>点击扫描本机 Agent</li>
+      <li>找到 OpenClaw 并添加到 Agent Bridge</li>
+      <li>确认配置：显示名称 / 唯一标识 <code class="inline-code">openclaw</code> / 类型 OpenClaw / 会话 <code class="inline-code">agent:main:main</code></li>
+      <li>点击保存</li>
+      <li>点击测试连接 &mdash; 确认 Gateway 可达</li>
+      <li>点击发送测试消息 &mdash; 确认自动创建测试聊天室</li>
+      <li>观察 OpenClaw 是否收到包含 callback_url 的消息</li>
+      <li>观察 UI 是否收到 callback 回写</li>
+      <li>观察测试房间消息、events、runtime log</li>
+      <li>完成后清理测试房间</li>
+    </ol>
+  </div>
+</section>
+
+<!-- Section 5: Priority A -->
+<section class="section" id="todo-a">
+  <div class="priority-header">
+    <span class="priority-tag priority-a">A</span>
+    <h3 style="font-size:20px;font-weight:700;color:#fff;">高优先级 &mdash; 合并 main 前建议完成</h3>
+  </div>
+
+  <div class="subsection">
+    <h3>A1. OpenClaw 真机完整链路验证 <span class="badge badge-p0">P0</span></h3>
+    <div class="card card-red">
+      <p style="color:var(--text2);font-size:14px;margin-bottom:12px;">验证完整链路：Agent Bridge &rarr; OpenClaw sessions_send &rarr; OpenClaw 生成回复 &rarr; callback/MCP reply_turn &rarr; Agent Bridge 回写 &rarr; Runtime V2 推进</p>
+      <ul class="check-list" style="font-size:13px;">
+        <li><span class="icon icon-pending">&#9711;</span> OpenClaw Gateway 是否接受当前 tools/invoke payload</li>
+        <li><span class="icon icon-pending">&#9711;</span> OpenClaw 是否能看到 args.message 中的 callback_url</li>
+        <li><span class="icon icon-pending">&#9711;</span> OpenClaw 是否会按指令执行 callback</li>
+        <li><span class="icon icon-pending">&#9711;</span> callback token 是否正确</li>
+        <li><span class="icon icon-pending">&#9711;</span> Runtime V2 是否能完成 turn</li>
+      </ul>
+      <p style="color:var(--green);font-size:13px;margin-top:12px;"><strong>验收：</strong>发送测试消息后，OpenClaw 能真实回写到 Agent Bridge，并在 UI 中显示回复。</p>
+    </div>
+  </div>
+
+  <div class="subsection">
+    <h3>A2. MCP Server 兼容性验证 <span class="badge badge-p0">P0</span></h3>
+    <div class="card card-red">
+      <ul class="check-list" style="font-size:13px;">
+        <li><span class="icon icon-pending">&#9711;</span> 真实 MCP Client 是否能启动该 MCP Server</li>
+        <li><span class="icon icon-pending">&#9711;</span> tools/list 是否能看到 agent_bridge.* 工具</li>
+        <li><span class="icon icon-pending">&#9711;</span> tools/call 是否能调用 reply_turn</li>
+        <li><span class="icon icon-pending">&#9711;</span> 错误返回是否符合 MCP Client 可读格式</li>
+      </ul>
+      <p style="color:var(--green);font-size:13px;margin-top:12px;"><strong>验收：</strong>至少一个真实 MCP Client 可以成功调用 agent_bridge.reply_turn。</p>
+    </div>
+  </div>
+
+  <div class="subsection">
+    <h3>A3. 测试房间删除后端原子化 <span class="badge badge-p1">P1</span></h3>
+    <div class="card card-orange">
+      <p style="color:var(--text2);font-size:14px;">给后端 <code class="inline-code">/api/rooms/delete</code> 增加 <code class="inline-code">force_if_temporary</code> 参数，后端自动完成暂停 + 删除，避免前端中间态。</p>
+      <p style="color:var(--green);font-size:13px;margin-top:12px;"><strong>验收：</strong>前端清理测试房间只需调用一次 delete API。</p>
+    </div>
+  </div>
+
+  <div class="subsection">
+    <h3>A4. 安装脚本与发布路径确认 <span class="badge badge-p1">P1</span></h3>
+    <div class="card card-orange">
+      <ul class="check-list" style="font-size:13px;">
+        <li><span class="icon icon-pending">&#9711;</span> install.sh/ps1 默认安装分支确认</li>
+        <li><span class="icon icon-pending">&#9711;</span> README 安装命令正确性</li>
+        <li><span class="icon icon-pending">&#9711;</span> 旧版本缓存处理</li>
+        <li><span class="icon icon-pending">&#9711;</span> 增加 bridge version / build info</li>
+        <li><span class="icon icon-pending">&#9711;</span> UI 页脚显示版本号</li>
+      </ul>
+      <p style="color:var(--green);font-size:13px;margin-top:12px;"><strong>验收：</strong>用户全新安装后，启动 UI 看到的是当前新版本界面。</p>
+    </div>
+  </div>
+
+  <div class="subsection">
+    <h3>A5. 补齐端到端集成测试 <span class="badge badge-p1">P1</span></h3>
+    <div class="card card-orange">
+      <p style="color:var(--text2);font-size:14px;margin-bottom:10px;">建议新增的测试：</p>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">
+        <code class="inline-code">test_ui_openclaw_discovery_to_adapter_config</code>
+        <code class="inline-code">test_agent_integration_test_auto_creates_temporary_room</code>
+        <code class="inline-code">test_cleanup_temporary_room_force_delete</code>
+        <code class="inline-code">test_callback_completes_current_turn</code>
+        <code class="inline-code">test_scheduler_does_not_call_legacy_tick_when_v2_enabled</code>
+        <code class="inline-code">test_openclaw_sessions_message_contains_callback_instruction</code>
+        <code class="inline-code">test_mcp_reply_turn_completes_turn</code>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Section 5: Priority B -->
+<section class="section" id="todo-b">
+  <div class="priority-header">
+    <span class="priority-tag priority-b">B</span>
+    <h3 style="font-size:20px;font-weight:700;color:#fff;">中优先级 &mdash; 建议近期完成</h3>
+  </div>
+
+  <div style="display:grid;gap:16px;">
+    <div class="card card-blue">
+      <h4 style="font-size:15px;font-weight:600;color:var(--blue);margin-bottom:8px;">B1. Room 当前 turn 状态可视化增强</h4>
+      <p style="color:var(--text2);font-size:14px;">在 room 对话页显示：当前状态、等待 Agent、turn_id、correlation_id、等待时长、下一位 Agent、操作（跳过/重试/暂停）。让用户能看懂系统卡在哪里。</p>
+    </div>
+    <div class="card card-blue">
+      <h4 style="font-size:15px;font-weight:600;color:var(--blue);margin-bottom:8px;">B2. Callback 调试面板</h4>
+      <p style="color:var(--text2);font-size:14px;">显示 callback_url、turn_id、correlation_id、curl 示例，当 OpenClaw 不自动回写时可手动验证。</p>
+    </div>
+    <div class="card card-blue">
+      <h4 style="font-size:15px;font-weight:600;color:var(--blue);margin-bottom:8px;">B3. Agent 连接健康状态增强</h4>
+      <p style="color:var(--text2);font-size:14px;">拆分为：未配置 &rarr; 连接可达 &rarr; 已投递测试消息 &rarr; 等待 callback &rarr; callback 已回写 &rarr; 联调通过/失败。</p>
+    </div>
+    <div class="card card-blue">
+      <h4 style="font-size:15px;font-weight:600;color:var(--blue);margin-bottom:8px;">B4. 自动识别 OpenClaw token_jsonpath</h4>
+      <p style="color:var(--text2);font-size:14px;">后端 discovery 阶段自动检测认证字段，UI 只显示"认证：已自动识别"。</p>
+    </div>
+    <div class="card card-blue">
+      <h4 style="font-size:15px;font-weight:600;color:var(--blue);margin-bottom:8px;">B5. OpenClaw 侧执行能力提示增强</h4>
+      <p style="color:var(--text2);font-size:14px;">在消息中明确指示 callback 操作，UI 提示 30 秒无 callback 可能的权限问题。</p>
+    </div>
+    <div class="card card-blue">
+      <h4 style="font-size:15px;font-weight:600;color:var(--blue);margin-bottom:8px;">B6. Runtime timeout 策略 UI 化</h4>
+      <p style="color:var(--text2);font-size:14px;">让用户配置：等待回复超时（默认 180 秒）、超时后行为（跳过/重试/暂停/标记错误）、最大重试次数。</p>
+    </div>
+    <div class="card card-blue">
+      <h4 style="font-size:15px;font-weight:600;color:var(--blue);margin-bottom:8px;">B7. Room Policy 产品化</h4>
+      <p style="color:var(--text2);font-size:14px;">支持：轮流发言、主持人模式、只回复被点名消息、允许主动插话、广播模式。</p>
+    </div>
+  </div>
+</section>
+
+<!-- Section 5: Priority C -->
+<section class="section" id="todo-c">
+  <div class="priority-header">
+    <span class="priority-tag priority-c">C</span>
+    <h3 style="font-size:20px;font-weight:700;color:#fff;">低优先级 &mdash; 后续增强</h3>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+    <div class="card card-purple">
+      <h4 style="font-size:14px;font-weight:600;color:var(--purple);margin-bottom:6px;">C1. 流式消息支持</h4>
+      <p style="color:var(--text2);font-size:13px;">支持 agent.response.delta / completed，UI 显示"正在输入"。</p>
+    </div>
+    <div class="card card-purple">
+      <h4 style="font-size:14px;font-weight:600;color:var(--purple);margin-bottom:6px;">C2. WebSocket / SSE 实时刷新</h4>
+      <p style="color:var(--text2);font-size:13px;">实时推送新消息、turn 变化、Agent 状态、callback。</p>
+    </div>
+    <div class="card card-purple">
+      <h4 style="font-size:14px;font-weight:600;color:var(--purple);margin-bottom:6px;">C3. file_outbox watcher 完整化</h4>
+      <p style="color:var(--text2);font-size:13px;">稳定 watcher、outbox cursor、去重、统一走 receive_agent_response。</p>
+    </div>
+    <div class="card card-purple">
+      <h4 style="font-size:14px;font-weight:600;color:var(--purple);margin-bottom:6px;">C4. Agent 主动发言策略</h4>
+      <p style="color:var(--text2);font-size:13px;">支持 normal / interrupt / whisper / system 模式。</p>
+    </div>
+    <div class="card card-purple">
+      <h4 style="font-size:14px;font-weight:600;color:var(--purple);margin-bottom:6px;">C5. 多模型/Agent 能力声明</h4>
+      <p style="color:var(--text2);font-size:13px;">supports_callback / mcp / streaming / tools / images 等能力标签。</p>
+    </div>
+    <div class="card card-purple">
+      <h4 style="font-size:14px;font-weight:600;color:var(--purple);margin-bottom:6px;">C6. 日志脱敏与 Debug 开关</h4>
+      <p style="color:var(--text2);font-size:13px;">自动脱敏 token/password/api_key，按需开启 debug 日志。</p>
+    </div>
+    <div class="card card-purple">
+      <h4 style="font-size:14px;font-weight:600;color:var(--purple);margin-bottom:6px;">C7. 诊断包导出</h4>
+      <p style="color:var(--text2);font-size:13px;">一键导出脱敏配置 + room state + events + runtime log。</p>
+    </div>
+    <div class="card card-purple">
+      <h4 style="font-size:14px;font-weight:600;color:var(--purple);margin-bottom:6px;">C8. Room / Agent 模板市场</h4>
+      <p style="color:var(--text2);font-size:13px;">预设模板：双人讨论、单 Agent 测试、协作房间等。</p>
+    </div>
+  </div>
+</section>
+
+<!-- Section 6: Risks -->
+<section class="section" id="risks">
+  <h2>6. 当前风险点</h2>
+
+  <div style="display:grid;gap:16px;">
+    <div class="card card-red">
+      <h4 style="font-size:15px;font-weight:600;color:var(--red);margin-bottom:10px;">6.1 OpenClaw 是否真的能 callback 仍需实测 <span class="badge badge-risk">最大风险</span></h4>
+      <p style="color:var(--text2);font-size:14px;">代码已把 callback_url 放进 OpenClaw message，但实际执行取决于：OpenClaw session 工具权限、exec/http 请求是否需用户批准、127.0.0.1:7899 是否可达、运行环境是否同机、callback token 是否正确。</p>
+    </div>
+    <div class="card card-red">
+      <h4 style="font-size:15px;font-weight:600;color:var(--red);margin-bottom:10px;">6.2 MCP Server 兼容性风险</h4>
+      <p style="color:var(--text2);font-size:14px;">当前为自实现协议，风险包括：initialize 协议细节不完整、tools/list schema 不完全兼容、tools/call 返回格式差异、stdio flush/newline/error code 处理。</p>
+    </div>
+    <div class="card card-yellow">
+      <h4 style="font-size:15px;font-weight:600;color:var(--yellow);margin-bottom:10px;">6.3 UI 与后端配置字段需持续保持一致</h4>
+      <p style="color:var(--text2);font-size:14px;">adapter schema 变化时，必须同步更新：UI collectAdapterData、server handle_update_config_full、adapters normalize_adapter、tests。</p>
+    </div>
+    <div class="card card-yellow">
+      <h4 style="font-size:15px;font-weight:600;color:var(--yellow);margin-bottom:10px;">6.4 自动测试房间会写入 bridge.yaml</h4>
+      <p style="color:var(--text2);font-size:14px;">不清理会积累测试 room，多次测试同一 Agent 会生成多个 test_xxx，用户可能误把测试房间当正式房间。可通过"复用同一 Agent 的测试房间"优化。</p>
+    </div>
+  </div>
+</section>
+
+<!-- Section 7: Priority -->
+<section class="section" id="priority">
+  <h2>7. 建议的后续开发优先级</h2>
+
+  <div class="matrix">
+    <div class="matrix-item" style="border-left:4px solid var(--red);">
+      <h4><span class="badge badge-p0">P0</span> 合并前必须验证</h4>
+      <ol>
+        <li>OpenClaw 真机 callback 链路</li>
+        <li>发送测试消息完整联调</li>
+        <li>Callback 成功后 Runtime V2 推进</li>
+        <li>旧 PollManager 不再双驱动</li>
+        <li>安装后 UI 确实为新版</li>
+      </ol>
+    </div>
+    <div class="matrix-item" style="border-left:4px solid var(--orange);">
+      <h4><span class="badge badge-p1">P1</span> 合并前强烈建议修正</h4>
+      <ol>
+        <li>后端 rooms/delete 支持 force_if_temporary</li>
+        <li>UI 当前 turn 状态可视化</li>
+        <li>Callback 调试 curl 示例</li>
+        <li>OpenClaw token_jsonpath 自动识别</li>
+        <li>MCP 真实客户端验证</li>
+      </ol>
+    </div>
+    <div class="matrix-item" style="border-left:4px solid var(--blue);">
+      <h4><span class="badge badge-p2">P2</span> 近期增强</h4>
+      <ol>
+        <li>Room policy UI 产品化</li>
+        <li>Runtime timeout 策略 UI 化</li>
+        <li>file_outbox watcher 完整实测</li>
+        <li>诊断包导出</li>
+        <li>测试 room 复用策略</li>
+      </ol>
+    </div>
+    <div class="matrix-item" style="border-left:4px solid var(--purple);">
+      <h4><span class="badge badge-p3">P3</span> 未来能力</h4>
+      <ol>
+        <li>流式输出</li>
+        <li>WebSocket/SSE 实时刷新</li>
+        <li>Agent 主动插话策略</li>
+        <li>Agent 模板市场</li>
+        <li>多模型能力标签</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- Section 8: Validation -->
+<section class="section" id="validation">
+  <h2>8. 建议验收清单</h2>
+
+  <div class="validation-grid">
+    <div class="validation-card">
+      <h4>8.1 基础启动验收</h4>
+      <ul class="check-list" style="font-size:13px;">
+        <li><span class="icon icon-pending">&#9711;</span> bridge start 能启动服务</li>
+        <li><span class="icon icon-pending">&#9711;</span> 浏览器打开 http://127.0.0.1:7899 正常</li>
+        <li><span class="icon icon-pending">&#9711;</span> UI 为新版 Agent 配置界面</li>
+        <li><span class="icon icon-pending">&#9711;</span> /api/status 和 /api/config 正常</li>
+      </ul>
+    </div>
+    <div class="validation-card">
+      <h4>8.2 Agent 配置验收</h4>
+      <ul class="check-list" style="font-size:13px;">
+        <li><span class="icon icon-pending">&#9711;</span> 扫描能发现 OpenClaw</li>
+        <li><span class="icon icon-pending">&#9711;</span> 添加后显示简洁卡片</li>
+        <li><span class="icon icon-pending">&#9711;</span> 保存后 bridge.yaml 写入 adapter.type=openclaw_sessions</li>
+      </ul>
+    </div>
+    <div class="validation-card">
+      <h4>8.3 测试连接验收</h4>
+      <ul class="check-list" style="font-size:13px;">
+        <li><span class="icon icon-pending">&#9711;</span> 点击测试连接，Gateway 可达时显示连接可达</li>
+        <li><span class="icon icon-pending">&#9711;</span> 提示"这不代表 callback 已完成回写"</li>
+      </ul>
+    </div>
+    <div class="validation-card">
+      <h4>8.4 发送测试消息验收</h4>
+      <ul class="check-list" style="font-size:13px;">
+        <li><span class="icon icon-pending">&#9711;</span> 未加入 room 时提示自动创建测试聊天室</li>
+        <li><span class="icon icon-pending">&#9711;</span> Runtime V2 投递测试消息，返回 turn_id/correlation_id</li>
+        <li><span class="icon icon-pending">&#9711;</span> OpenClaw 收到包含 callback_url 的消息</li>
+      </ul>
+    </div>
+    <div class="validation-card">
+      <h4>8.5 Callback 验收</h4>
+      <ul class="check-list" style="font-size:13px;">
+        <li><span class="icon icon-pending">&#9711;</span> OpenClaw callback 回写</li>
+        <li><span class="icon icon-pending">&#9711;</span> active.jsonl 出现 Agent 回复</li>
+        <li><span class="icon icon-pending">&#9711;</span> events.jsonl 出现 agent.response.received</li>
+        <li><span class="icon icon-pending">&#9711;</span> state.json current_turn 完成或推进</li>
+        <li><span class="icon icon-pending">&#9711;</span> UI 显示回复</li>
+      </ul>
+    </div>
+    <div class="validation-card">
+      <h4>8.6 测试房间验收</h4>
+      <ul class="check-list" style="font-size:13px;">
+        <li><span class="icon icon-pending">&#9711;</span> 自动创建的测试房间显示"测试房间"</li>
+        <li><span class="icon icon-pending">&#9711;</span> 按钮显示"清理"</li>
+        <li><span class="icon icon-pending">&#9711;</span> 点击清理能暂停并删除测试房间</li>
+        <li><span class="icon icon-pending">&#9711;</span> 刷新后测试房间不再出现</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- Section 9: Next Steps -->
+<section class="section" id="next">
+  <h2>9. 下一步任务</h2>
+
+  <div class="card" style="border:1px solid var(--accent);">
+    <p style="color:var(--text);font-size:14px;margin-bottom:14px;">当前 dev 分支已<strong style="color:var(--green)">完成主要架构改造和 UI 产品化</strong>，下一步重点进入<strong style="color:var(--yellow)">真实联调和收尾稳定</strong>阶段。请优先完成以下任务：</p>
+    <ol style="padding-left:20px;color:var(--text2);font-size:14px;">
+      <li style="margin-bottom:8px;">用真实 OpenClaw Gateway 跑通完整链路：发送测试消息 &rarr; OpenClaw 被唤醒 &rarr; callback/MCP reply_turn 回写 &rarr; Runtime V2 推进</li>
+      <li style="margin-bottom:8px;">如果 OpenClaw 没有自动 callback，定位是工具权限、callback token 还是回写接口问题</li>
+      <li style="margin-bottom:8px;">给 /api/rooms/delete 增加 force_if_temporary=true，后端原子清理测试房间</li>
+      <li style="margin-bottom:8px;">在 room 对话页显示 current_turn 状态</li>
+      <li style="margin-bottom:8px;">增加 callback 调试面板，提供一键复制 curl 示例</li>
+      <li style="margin-bottom:8px;">验证 MCP Server 能被真实 MCP Client 调用</li>
+      <li style="margin-bottom:8px;">补充端到端测试</li>
+      <li>检查安装脚本和 README，确保普通用户安装后看到新版 UI</li>
+    </ol>
+  </div>
+</section>
+
+<!-- Section 10: Final -->
+<section class="section" id="final">
+  <div class="conclusion">
+    <h2 style="font-size:22px;font-weight:700;color:#fff;">10. 最终评价</h2>
+    <p style="margin-bottom:16px;">
+      当前 <code class="inline-code" style="background:var(--surface2);border-color:var(--border);">dev</code> 分支已经从最初的<br>
+      <strong style="color:var(--red)">文件轮询 + 单向唤醒 + waiting_response 死等</strong>
+    </p>
+    <p style="margin-bottom:20px;">
+      升级为<br>
+      <span class="highlight">Adapter V2 + Runtime V2 + EventBus + Scheduler + Callback/MCP 回写 + OpenClaw 专用 adapter + 产品化 UI 联调</span>
+    </p>
+    <p>整体方向正确，架构核心已经成型。当前最重要的工作不再是继续堆新抽象，而是：<strong style="color:var(--accent)">真实联调、稳定性验证、MCP 兼容性确认、UI 状态可视化增强、安装发布流程完善</strong>。</p>
+    <p style="margin-top:16px;color:var(--green);font-weight:600;font-size:14px;">如果 OpenClaw 真机 callback 链路跑通，并且测试全部通过，则当前 dev 分支可以考虑进入合并 main 前的候选状态。</p>
+  </div>
+</section>
+
+</div>
+
+<!-- Back to top -->
+<button class="back-top" id="backTop" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="回到顶部">&uarr;</button>
+
+<script>
+  // Active nav
+  const links = document.querySelectorAll('.sidebar a');
+  const sections = document.querySelectorAll('[id]');
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const a = document.querySelector(`.sidebar a[href="#${e.target.id}"]`);
+        if (a) a.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -60% 0px' });
+  sections.forEach(s => { if (s.id) obs.observe(s); });
+
+  // Back to top
+  window.addEventListener('scroll', () => {
+    document.getElementById('backTop').classList.toggle('visible', window.scrollY > 400);
+  });
+
+  // Close sidebar on mobile link click
+  links.forEach(l => l.addEventListener('click', () => {
+    document.querySelector('.sidebar').classList.remove('open');
+  }));
+</script>
+</body>
+</html>
