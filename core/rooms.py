@@ -406,6 +406,27 @@ def _log_tick(shared_dir, room_id, event, message="", level="info", agent_id="",
 
 
 def tick_room(config, room_id, force=False):
+    """DEPRECATED: Legacy V1 turn state machine. Use runtime.run_room_step() instead.
+
+    This function is kept for backward compatibility during migration but will
+    be removed in a future version.  All scheduling must go through the V2
+    Scheduler → runtime.run_room_step() path.
+
+    DEPRECATED since Agent Bridge v2 Scheduler integration.
+    """
+    import warnings
+    warnings.warn(
+        "rooms.tick_room() is deprecated and will be removed. "
+        "Use runtime.run_room_step() via the V2 Scheduler instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    import logging
+    logging.getLogger("agent_bridge").warning(
+        "LEGACY V1: tick_room() called for room_id=%s. "
+        "This path is deprecated — migrate to V2 Scheduler.",
+        room_id,
+    )
     shared_dir = Path(os.path.expandvars(os.path.expanduser(str(config.get("shared_dir", "~/.agent-bridge")))))
     rooms = config.get("rooms", {})
     if room_id not in rooms:
@@ -605,6 +626,27 @@ def tick_room(config, room_id, force=False):
 
 
 def tick_running_rooms(config):
+    """DEPRECATED: Legacy V1 batch runner. Use Scheduler.scan_running_rooms() instead.
+
+    This function iterates all running rooms and calls the deprecated tick_room()
+    on each one.  It is kept for backward compatibility during migration but will
+    be removed in a future version.  All scheduling must go through the V2
+    Scheduler → runtime.run_room_step() path.
+
+    DEPRECATED since Agent Bridge v2 Scheduler integration.
+    """
+    import warnings
+    warnings.warn(
+        "rooms.tick_running_rooms() is deprecated and will be removed. "
+        "Use Scheduler.scan_running_rooms() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    import logging
+    logging.getLogger("agent_bridge").warning(
+        "LEGACY V1: tick_running_rooms() called. "
+        "This path is deprecated — migrate to V2 Scheduler."
+    )
     results = []
     shared_dir = Path(os.path.expandvars(os.path.expanduser(str(config.get("shared_dir", "~/.agent-bridge")))))
     for room_id, room_cfg in config.get("rooms", {}).items():

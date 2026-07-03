@@ -22,7 +22,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ui"))
 
-from server import BridgeHandler, PollManager, discover_local_agents, find_shared_dir, read_bridge
+from server import BridgeHandler
+from poll_manager import PollManager
+from discovery import discover_local_agents
+from config import find_shared_dir, read_bridge
 
 
 def get_free_port():
@@ -617,7 +620,7 @@ class TestRoomAPI(TestServerBase):
         self.assertFalse(data["ok"])
         self.assertIn("not in room", data["error"])
 
-    @patch("server.run_room_step")
+    @patch("routes.run_room_step")
     def test_agent_integration_test_auto_creates_temp_room(self, mock_run_room_step):
         self._put("/api/config/full", {
             "shared_dir": str(self.tmpdir),
@@ -660,7 +663,7 @@ class TestRoomAPI(TestServerBase):
 class TestOpenCurrentFolderAPI(TestServerBase):
     """打开当前对话目录 API 绔偣銆?"""
 
-    @patch("server.open_in_file_manager", return_value=(True, None))
+    @patch("routes.open_in_file_manager", return_value=(True, None))
     def test_open_active_folder(self, mock_open):
         """POST /api/open-current-folder 打开当前对话所在目录。"""
         status, data = self._post("/api/open-current-folder", {
@@ -671,7 +674,7 @@ class TestOpenCurrentFolderAPI(TestServerBase):
         self.assertEqual(Path(mock_open.call_args.args[0]), self.tmpdir / "active.jsonl")
         self.assertTrue(mock_open.call_args.kwargs["select"])
 
-    @patch("server.open_in_file_manager", return_value=(True, None))
+    @patch("routes.open_in_file_manager", return_value=(True, None))
     def test_open_archive_folder(self, mock_open):
         """POST /api/open-current-folder 打开归档对话所在目录。"""
         history_dir = self.tmpdir / "history"
@@ -690,7 +693,7 @@ class TestOpenCurrentFolderAPI(TestServerBase):
         self.assertEqual(Path(mock_open.call_args.args[0]), archive.resolve())
         self.assertTrue(mock_open.call_args.kwargs["select"])
 
-    @patch("server.open_in_file_manager", return_value=(True, None))
+    @patch("routes.open_in_file_manager", return_value=(True, None))
     def test_open_current_folder_rejects_traversal_archive(self, mock_open):
         """POST /api/open-current-folder 拒绝目录穿越文件名。"""
         status, data = self._post("/api/open-current-folder", {

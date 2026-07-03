@@ -804,7 +804,7 @@ class TestOpenClawDiscovery(unittest.TestCase):
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ui"))
 
-        from server import _discovered_agent
+        from discovery import _discovered_agent
         item = _discovered_agent(
             "openclaw", "OpenClaw", "OpenClaw",
             Path("/tmp/fake_home/.openclaw"), "test",
