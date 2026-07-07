@@ -18,7 +18,6 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Optional
 
 _parent = str(Path(__file__).resolve().parent)
 if _parent not in sys.path:
@@ -194,17 +193,42 @@ class Scheduler:
             future = self._executor.submit(self._run_step, config, room_id)
             future.add_done_callback(lambda done, rid=room_id: self._finish_room(rid, done))
 
+    def _waiting_turn_has_response(self, room_id):
+        """Detect the only waiting-state case that needs an immediate follow-up."""
+        try:
+            from room_state import read_room_state_consistent
+            from rooms import normalize_room
+            config = dict(self._config)
+            room = (config.get("rooms") or {}).get(room_id)
+            if not room:
+                return False
+            state = read_room_state_consistent(
+                Path(os.path.expandvars(os.path.expanduser(str(config.get("shared_dir", "~/.agent-bridge"))))),
+                room_id,
+                normalize_room({**room, "id": room_id}),
+            )
+            return bool((state.get("current_turn") or {}).get("response_message_id"))
+        except Exception:
+            return False
+
     def _finish_room(self, room_id, future):
+        result = None
         if future is not None:
             try:
-                future.result()
+                result = future.result()
             except Exception:
                 logger.exception("scheduler step failed for room %s", room_id)
         with self._condition:
             self._inflight.discard(room_id)
             if room_id in self._reschedule:
                 self._reschedule.discard(room_id)
-                self._enqueue_locked(room_id)
+                # Runtime schedules a deadline while returning ``waiting``. Do
+                # not turn that into a tight polling loop. An early callback is
+                # the exception: it has already stored a response and needs the
+                # completion transition immediately.
+                waiting = isinstance(result, dict) and result.get("action") == "waiting"
+                if not waiting or self._waiting_turn_has_response(room_id):
+                    self._enqueue_locked(room_id)
             self._condition.notify()
 
     @staticmethod
