@@ -14,9 +14,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import queue
 import threading
-import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -40,7 +40,7 @@ class ChannelConnector:
         self.config = config
         self.agent_id = str(config["agent_id"])
         self.hub_url = str(config["hub_url"])
-        self.token = str(config.get("token") or "")
+        self.token = os.path.expandvars(str(config.get("token") or ""))
         self.outgoing: "queue.Queue[Dict[str, Any]]" = queue.Queue()
         self._stop = threading.Event()
         self._socket = None
