@@ -13,6 +13,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # ui/ itself for intra-package imports
 from send import validate_agent_id
 from poll import parse_jsonl
+
+# 顺带引入 OpenClaw 工具探测能力（让扫描时就能选定正确的工具名）
+try:
+    from adapters.openclaw_sessions import probe_openclaw_tool  # noqa: E402
+except Exception:
+    probe_openclaw_tool = None
 from adapters import adapter_capability, adapter_to_wakeup, wakeup_to_adapter
 
 from config import (
@@ -181,26 +187,58 @@ def discover_local_agents(shared_dir, include_bridge_config=True):
         if "token_jsonpath" not in auth_cfg:
             auth_cfg["token_jsonpath"] = "gateway.auth.token"
 
+        # 主动探测 OpenClaw 服务：选端口 + 探测可用工具名
+        # 默认端口候选（不同发行版/版本可能用不同端口）
+        openclaw_url = "http://127.0.0.1:18789/tools/invoke"
+        detected_tool = "sessions_send"  # 默认值（最经典）
+        probe_note = ""
+
+        if probe_openclaw_tool and _probe_http_reachable("http://127.0.0.1:18789/", timeout=2):
+            # 服务在跑 → 探测工具名
+            try:
+                t = probe_openclaw_tool("http://127.0.0.1:18789/tools/invoke", auth_cfg, timeout=4)
+                if t:
+                    detected_tool = t
+                    probe_note = f"（已自动探测到工具：{t}）"
+            except Exception:
+                pass
+        elif probe_openclaw_tool:
+            # 18789 没响应，试几个其他常见端口
+            for alt_port in (8765, 3000, 8080):
+                if _probe_http_reachable(f"http://127.0.0.1:{alt_port}/", timeout=1):
+                    openclaw_url = f"http://127.0.0.1:{alt_port}/tools/invoke"
+                    try:
+                        t = probe_openclaw_tool(openclaw_url, auth_cfg, timeout=3)
+                        if t:
+                            detected_tool = t
+                            probe_note = f"（端口 {alt_port}，工具 {t}）"
+                    except Exception:
+                        pass
+                    break
+            else:
+                probe_note = "（未检测到 OpenClaw 服务运行，添加后请先启动 OpenClaw 再测试）"
+
         add(_discovered_agent(
             "openclaw",
             "OpenClaw",
             "OpenClaw",
             openclaw_config if openclaw_config.exists() else home / ".openclaw",
-            "检测到 OpenClaw 本地配置",
+            f"检测到 OpenClaw 本地配置{probe_note}",
             {
-                "url": "http://127.0.0.1:18789/tools/invoke",
+                "url": openclaw_url,
                 "method": "POST",
                 "auth": auth_cfg,
                 "body_template": {
-                    "tool": "sessions_send",
+                    "tool": detected_tool,
                     "args": {"sessionKey": "agent:main:main", "message": "{{message}}"},
                 },
             },
             adapter_override={
                 "type": "openclaw_sessions",
                 "config": {
-                    "url": "http://127.0.0.1:18789/tools/invoke",
+                    "url": openclaw_url,
                     "sessions_key": "agent:main:main",
+                    "tool": detected_tool,
                     "timeout": 60,
                 },
                 "auth": auth_cfg,
