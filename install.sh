@@ -3,12 +3,12 @@
 # Agent Bridge — Installer (macOS / Linux)
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/SusuAgent/agent-bridge/dev/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/SusuAgent/agent-bridge/main/install.sh | bash
 # ═══════════════════════════════════════════════════════════
 set -euo pipefail
 
 REPO="SusuAgent/agent-bridge"
-BRANCH="dev"
+BRANCH="main"
 INSTALL_DIR="$HOME/.agent-bridge"
 SRC_DIR="$INSTALL_DIR/src"
 BIN_DIR="$HOME/.local/bin"

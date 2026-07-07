@@ -8,7 +8,7 @@
 $ErrorActionPreference = "Stop"
 
 $Repo = "SusuAgent/agent-bridge"
-$Branch = "dev"
+$Branch = "main"
 $InstallDir = "$env:USERPROFILE\.agent-bridge"
 $SrcDir = "$InstallDir\src"
 $PidFile = "$InstallDir\.server.pid"
