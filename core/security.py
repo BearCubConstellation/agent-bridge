@@ -64,28 +64,30 @@ def _verify(expected, provided, missing_message="missing token"):
     return True, ""
 
 
-def verify_callback_token(config, agent_id, provided_token, allow_unauthenticated=True):
-    """Verify a callback token.
+def _allow_unauthenticated_local(config, explicit=None):
+    if explicit is not None:
+        return bool(explicit)
+    server = (config or {}).get("server") or {}
+    return is_loopback_host(server.get("host", "127.0.0.1"))
 
-    Unauthenticated callbacks remain available only when the caller explicitly
-    identifies the request as local-only.  The HTTP server passes ``False`` for
-    non-loopback binds and refuses to start without configured credentials.
-    """
+
+def verify_callback_token(config, agent_id, provided_token, allow_unauthenticated=None):
+    """Verify callback credentials; unauthenticated mode is loopback-only."""
     security = (config or {}).get("security") or {}
     expected = _configured_token(security, "callback", agent_id)
     if not expected:
-        if allow_unauthenticated:
+        if _allow_unauthenticated_local(config, allow_unauthenticated):
             return True, ""
         return False, "callback token is required for non-local bind"
     return _verify(expected, provided_token)
 
 
-def verify_mcp_token(config, provided_token, allow_unauthenticated=False):
-    """Verify the token protecting HTTP MCP endpoints."""
+def verify_mcp_token(config, provided_token, allow_unauthenticated=None):
+    """Verify HTTP MCP credentials; unauthenticated mode is loopback-only."""
     security = (config or {}).get("security") or {}
     expected = _configured_token(security, "mcp")
     if not expected:
-        if allow_unauthenticated:
+        if _allow_unauthenticated_local(config, allow_unauthenticated):
             return True, ""
         return False, "mcp token is required for non-local bind"
     return _verify(expected, provided_token)
@@ -116,11 +118,7 @@ def extract_bearer_token(headers):
 
 
 def extract_token_from_request(headers, params=None, allow_query=False):
-    """Extract an Authorization bearer token.
-
-    Query-string credentials are intentionally disabled by default because they
-    leak into logs, browser history and proxy telemetry.
-    """
+    """Extract an Authorization bearer token; query credentials are opt-in."""
     bearer = extract_bearer_token(headers)
     if bearer:
         return bearer

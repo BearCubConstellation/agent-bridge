@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os
+import importlib
 import sys
 import tempfile
 import threading
@@ -10,12 +10,18 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "core"))
+sys.path.insert(0, str(ROOT))
 
 import runtime
 from room_state import mutate_room_state, read_room_state_consistent
 from rooms import append_room_message, read_room_messages
 from scheduler import Scheduler
-from security import validate_network_exposure
+from security import (
+    extract_token_from_request,
+    validate_network_exposure,
+    verify_callback_token,
+    verify_mcp_token,
+)
 
 
 class RuntimeHardeningTests(unittest.TestCase):
@@ -88,9 +94,11 @@ class RuntimeHardeningTests(unittest.TestCase):
 
         with patch("runtime.deliver_via_registry", side_effect=no_reply):
             runtime.run_room_step(self.config, "r")
+
             def expire(state):
                 state["current_turn"]["timeout_at"] = "2000-01-01 00:00:00"
                 return True
+
             mutate_room_state(self.shared, "r", self.config["rooms"]["r"], expire)
             runtime.run_room_step(self.config, "r")
         self.assertEqual(2, len(calls))
@@ -129,6 +137,16 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertTrue(validate_network_exposure({}, "0.0.0.0"))
         self.assertEqual("", validate_network_exposure({"security": {"callback_token": "x", "mcp_token": "y"}}, "0.0.0.0"))
         self.assertEqual("", validate_network_exposure({}, "127.0.0.1"))
+
+    def test_nonlocal_callback_and_mcp_reject_missing_tokens(self):
+        cfg = {"server": {"host": "0.0.0.0"}, "security": {}}
+        self.assertFalse(verify_callback_token(cfg, "agent", "")[0])
+        self.assertFalse(verify_mcp_token(cfg, "")[0])
+        self.assertEqual("", extract_token_from_request({}, {"token": "leaky"}))
+
+    def test_server_module_imports(self):
+        module = importlib.import_module("ui.server")
+        self.assertTrue(hasattr(module, "BridgeHandler"))
 
 
 if __name__ == "__main__":
