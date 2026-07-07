@@ -1,235 +1,252 @@
 #!/usr/bin/env python3
-"""Room Runtime — state machine for turn-based Agent scheduling.
+"""V2 room runtime.
 
-This module implements the core ``run_room_step`` function that drives
-the v2 turn state machine for a single room.  It replaces the old
-monolithic ``tick_room`` from ``rooms.py``.
-
-Key differences from the old tick_room:
-  * Uses ``current_turn`` in state.json with explicit turn states.
-  * Generates turn_id / correlation_id for every delivery.
-  * Injects callback_url into adapter context.
-  * Emits events via EventBus.
-  * Supports timeout / retry / skip / manual_required.
-  * Does NOT directly call old ``deliver_to_adapter`` — uses adapter layer.
+The runtime deliberately separates a short, locked state transition from the
+potentially slow adapter call.  A turn is persisted as ``delivering`` before
+an adapter is called; callback handlers can therefore safely arrive before the
+adapter request returns without being overwritten by stale state.
 """
-import json
+from __future__ import annotations
+
 import os
 import sys
 import time as _time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
-# ── Local import compat ─────────────────────────────────
 _parent = str(Path(__file__).resolve().parent)
 if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
-from protocol import (                                    # noqa: E402
-    ROOM_RUNNING, ROOM_PAUSED, ROOM_ERROR,
-    TURN_IDLE, TURN_WAITING_RESPONSE, TURN_COMPLETED,
-    TURN_TIMEOUT, TURN_FAILED, TURN_MANUAL_REQUIRED, TURN_SKIPPED,
-    RESPONSE_SYNC, RESPONSE_CALLBACK, RESPONSE_FILE_OUTBOX,
-    RESPONSE_MCP_TOOL, RESPONSE_NONE, RESPONSE_MANUAL,
-    EVT_ROOM_STARTED, EVT_ROOM_PAUSED, EVT_MESSAGE_CREATED,
-    EVT_TURN_SELECTED, EVT_AGENT_WAKEUP_REQUESTED,
-    EVT_AGENT_WAKEUP_SUCCEEDED, EVT_AGENT_WAKEUP_FAILED,
-    EVT_AGENT_RESPONSE_RECEIVED, EVT_TURN_COMPLETED,
-    EVT_TURN_TIMEOUT, EVT_TURN_SKIPPED, EVT_ROOM_ERROR,
-    make_turn, make_delivery_request, make_delivery_ticket,
-    migrate_room_state,
+from adapters import adapter_capability, deliver_via_registry, normalize_adapter
+from events import emit_event
+from protocol import (
+    EVT_AGENT_RESPONSE_RECEIVED,
+    EVT_AGENT_WAKEUP_FAILED,
+    EVT_AGENT_WAKEUP_REQUESTED,
+    EVT_AGENT_WAKEUP_SUCCEEDED,
+    EVT_ROOM_ERROR,
+    EVT_ROOM_PAUSED,
+    EVT_TURN_COMPLETED,
+    EVT_TURN_SELECTED,
+    EVT_TURN_SKIPPED,
+    EVT_TURN_TIMEOUT,
+    RESPONSE_CALLBACK,
+    RESPONSE_MCP_TOOL,
+    RESPONSE_SYNC,
+    ROOM_ERROR,
+    ROOM_PAUSED,
+    ROOM_RUNNING,
+    TURN_DELIVERING,
+    TURN_FAILED,
+    TURN_MANUAL_REQUIRED,
+    TURN_SKIPPED,
+    TURN_WAITING_RESPONSE,
+    gen_delivery_id,
+    make_turn,
 )
-from events import emit_event                             # noqa: E402
-from rooms import (                                       # noqa: E402
-    room_dir, room_active_file, room_log_file,
-    normalize_room, ensure_room,
-    read_room_state, write_room_state,
-    read_room_cursor, write_room_cursor,
+from room_state import mutate_room_state, read_room_state_consistent
+from rooms import (
+    _extract_reply,
+    _format_delivery,
+    _line_no,
+    _log_tick,
+    _messages_with_lines,
+    _pending_for_agent,
     append_room_message,
-    _messages_with_lines, _pending_for_agent, _format_delivery,
-    _line_no, _extract_reply, _log_tick,
+    ensure_room,
+    normalize_room,
+    read_room_cursor,
+    room_active_file,
+    room_dir,
+    write_room_cursor,
 )
-from adapters import (                                    # noqa: E402
-    adapter_capability, normalize_adapter,
-    deliver_via_registry,
-)
-from poll import parse_jsonl                              # noqa: E402
 
-
-# ── Helpers ─────────────────────────────────────────────
 
 def _shared_dir(config):
-    return Path(os.path.expandvars(os.path.expanduser(
-        str(config.get("shared_dir", "~/.agent-bridge")))))
+    return Path(os.path.expandvars(os.path.expanduser(str(config.get("shared_dir", "~/.agent-bridge")))))
 
 
 def _callback_base_url(config):
-    """Build the base URL for agent callbacks."""
-    server_cfg = config.get("server", {})
-    host = server_cfg.get("host", "127.0.0.1")
-    port = server_cfg.get("port", 8825)
-    return f"http://{host}:{port}"
+    server_cfg = config.get("server", {}) or {}
+    return "http://{}:{}".format(server_cfg.get("host", "127.0.0.1"), server_cfg.get("port", 8825))
 
 
 def _callback_url(config, room_id, agent_id):
-    return f"{_callback_base_url(config)}/api/rooms/{room_id}/agents/{agent_id}/callback"
+    return "{}/api/rooms/{}/agents/{}/callback".format(_callback_base_url(config), room_id, agent_id)
 
 
 def _now_ts():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _parse_ts(ts_str):
+def _parse_ts(value):
     try:
-        return datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-    except (ValueError, TypeError):
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
         return None
 
 
-# ── Core step function ──────────────────────────────────
+def _schedule(room_id, timeout_at=None):
+    """Best-effort scheduler notification; a missing scheduler is harmless."""
+    try:
+        from scheduler import get_scheduler
+        scheduler = get_scheduler()
+        scheduler.schedule_room(room_id)
+        if timeout_at:
+            deadline = _parse_ts(timeout_at)
+            if deadline:
+                scheduler.schedule_room_at(room_id, deadline.timestamp())
+    except Exception:
+        pass
 
-def run_room_step(config, room_id):
-    """Execute one state-machine step for *room_id*.
 
-    This is the main entry point called by the Scheduler.  It reads
-    the current room state, decides what action to take, mutates
-    state, and persists changes.
-
-    Returns a result dict with at least ``ok``, ``room_id``, and
-    ``action`` keys.
-    """
-    shared_dir = _shared_dir(config)
-    rooms_cfg = config.get("rooms", {})
-
-    if room_id not in rooms_cfg:
-        return {"ok": False, "room_id": room_id, "action": "noop", "error": "room not found"}
-
-    room_cfg = normalize_room({**rooms_cfg[room_id], "id": room_id})
-    ensure_room(shared_dir, room_cfg)
-    state = read_room_state(shared_dir, room_id, room_cfg)
-    state = migrate_room_state(state, room_cfg)
-    state["order"] = room_cfg.get("order", [])
-    state["max_turns"] = room_cfg.get("max_turns", 50)
-
-    result = {"ok": True, "room_id": room_id, "action": "noop"}
-
-    # ── Check room status ──
-    if state.get("status") != ROOM_RUNNING:
-        return {**result, "action": "noop", "error": "room not running"}
-
-    # ── Check max_turns ──
-    if int(state.get("turn_count", 0)) >= int(state.get("max_turns", 50)):
-        state["status"] = ROOM_PAUSED
-        state["last_error"] = "max_turns reached"
-        write_room_state(shared_dir, room_id, state)
-        emit_event(shared_dir, room_id, EVT_ROOM_PAUSED, meta={"reason": "max_turns"})
-        _log_tick(shared_dir, room_id, "max_turns_reached", "已达到最大轮次，聊天室自动暂停", level="warn")
-        return {**result, "action": "paused", "error": "max_turns reached"}
-
-    # ── Check current_turn waiting_response ──
-    current_turn = state.get("current_turn")
-    if current_turn and current_turn.get("state") == TURN_WAITING_RESPONSE:
-        # Check if response received
-        resp_msg_id = current_turn.get("response_message_id", "")
-        if resp_msg_id:
-            return _complete_turn_and_advance(shared_dir, config, room_id, room_cfg, state, current_turn, result)
-
-        # Check timeout
-        timeout_at_str = current_turn.get("timeout_at", "")
-        if timeout_at_str:
-            timeout_at = _parse_ts(timeout_at_str)
-            if timeout_at and datetime.now() > timeout_at:
-                return _handle_timeout(shared_dir, config, room_id, room_cfg, state, current_turn, result)
-
-        # Still waiting
-        return {**result, "action": "waiting", "waiting_for": current_turn.get("agent_id", "")}
-
-    # ── Select next agent ──
-    order = room_cfg.get("order", [])
+def _advance(state, turn, order):
+    """Advance from the selected turn index, not merely the old cursor."""
     if not order:
-        state["last_error"] = "room has no agents"
-        state["status"] = ROOM_ERROR
-        write_room_state(shared_dir, room_id, state)
-        emit_event(shared_dir, room_id, EVT_ROOM_ERROR, meta={"error": "no agents"})
-        return {**result, "action": "error", "error": "no agents"}
+        state["current_turn"] = None
+        state["waiting_for"] = ""
+        state["waiting_line"] = 0
+        return 0
+    try:
+        selected = int(turn.get("turn_index", state.get("turn_index", 0))) % len(order)
+    except (TypeError, ValueError):
+        selected = 0
+    next_index = (selected + 1) % len(order)
+    state["turn_index"] = next_index
+    state["round"] = int(state.get("round", 0)) + (1 if next_index == 0 else 0)
+    state["current_turn"] = None
+    state["waiting_for"] = ""
+    state["waiting_line"] = 0
+    state["last_error"] = ""
+    return next_index
 
-    turn_index = int(state.get("turn_index", 0)) % len(order)
-    agent_id = order[turn_index]
 
-    # ── Collect pending messages ──
+def _timeout_at(seconds):
+    return (datetime.now() + timedelta(seconds=max(1, int(seconds)))).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _addressed_to(message, agent_id):
+    target = message.get("to", "")
+    if not target:
+        return False
+    if isinstance(target, list):
+        return agent_id in target
+    return str(target) == agent_id
+
+
+def _select_pending(shared_dir, room_id, room_cfg, state, messages):
+    """Pick a recipient while giving explicit ``to`` messages priority.
+
+    A directed message must not be blocked simply because the round-robin
+    cursor currently points at a different agent.
+    """
+    order = list(room_cfg.get("order", []))
+    if not order:
+        return "", 0, []
+    try:
+        start = int(state.get("turn_index", 0)) % len(order)
+    except (TypeError, ValueError):
+        start = 0
+
+    candidates = []
+    for offset in range(len(order)):
+        index = (start + offset) % len(order)
+        agent_id = order[index]
+        cursor = read_room_cursor(shared_dir, room_id, agent_id)
+        pending = _pending_for_agent(messages, agent_id, cursor)
+        if pending:
+            first_direct = next((m for m in pending if _addressed_to(m, agent_id)), None)
+            candidates.append((agent_id, index, pending, first_direct))
+
+    if not candidates:
+        return "", start, []
+
+    directed = [item for item in candidates if item[3] is not None]
+    if directed:
+        # Earlier message wins; order is a deterministic tie-breaker.
+        directed.sort(key=lambda item: (_line_no(item[3]), (item[1] - start) % len(order)))
+        return directed[0][0], directed[0][1], directed[0][2]
+
+    # Normal round-robin: the first ready agent from the current cursor wins.
+    return candidates[0][0], candidates[0][1], candidates[0][2]
+
+
+def _finish_completed_turn(shared_dir, room_id, room_cfg, turn, result):
+    order = room_cfg.get("order", [])
+
+    def complete(state):
+        current = state.get("current_turn") or {}
+        if current.get("turn_id") != turn.get("turn_id"):
+            return {"stale": True}
+        next_index = _advance(state, current, order)
+        return {"next_index": next_index}
+
+    _state, outcome = mutate_room_state(shared_dir, room_id, room_cfg, complete)
+    if outcome.get("stale"):
+        return {**result, "action": "stale"}
+    emit_event(shared_dir, room_id, EVT_TURN_COMPLETED, actor=turn.get("agent_id", ""),
+               turn_id=turn.get("turn_id", ""), correlation_id=turn.get("correlation_id", ""),
+               meta={"next_turn_index": outcome["next_index"]})
+    _log_tick(shared_dir, room_id, "response_seen", "已确认 Agent 回复并推进下一轮",
+              agent_id=turn.get("agent_id", ""), meta={"message_id": turn.get("response_message_id", "")})
+    _schedule(room_id)
+    return {**result, "action": "response_received", "to_agent": turn.get("agent_id", "")}
+
+
+def _pause_or_error(shared_dir, room_id, room_cfg, turn, action, result):
+    status = ROOM_PAUSED if action == "pause" else ROOM_ERROR
+    event = EVT_ROOM_PAUSED if action == "pause" else EVT_ROOM_ERROR
+
+    def apply(state):
+        current = state.get("current_turn") or {}
+        if current.get("turn_id") != turn.get("turn_id"):
+            return {"stale": True}
+        state["status"] = status
+        state["current_turn"] = None
+        state["waiting_for"] = ""
+        state["waiting_line"] = 0
+        state["last_error"] = "turn timeout: {}".format(turn.get("agent_id", ""))
+        return {"stale": False}
+
+    _state, outcome = mutate_room_state(shared_dir, room_id, room_cfg, apply)
+    if outcome.get("stale"):
+        return {**result, "action": "stale"}
+    emit_event(shared_dir, room_id, event, actor=turn.get("agent_id", ""),
+               turn_id=turn.get("turn_id", ""), meta={"reason": "timeout"})
+    return {**result, "action": "paused" if action == "pause" else "error",
+            "error": "timeout: {}".format(turn.get("agent_id", ""))}
+
+
+def _skip_turn(shared_dir, room_id, room_cfg, turn, result):
+    order = room_cfg.get("order", [])
+
+    def skip(state):
+        current = state.get("current_turn") or {}
+        if current.get("turn_id") != turn.get("turn_id"):
+            return {"stale": True}
+        current["state"] = TURN_SKIPPED
+        next_index = _advance(state, current, order)
+        return {"stale": False, "next_index": next_index}
+
+    _state, outcome = mutate_room_state(shared_dir, room_id, room_cfg, skip)
+    if outcome.get("stale"):
+        return {**result, "action": "stale"}
+    emit_event(shared_dir, room_id, EVT_TURN_SKIPPED, actor=turn.get("agent_id", ""),
+               turn_id=turn.get("turn_id", ""), meta={"next_turn_index": outcome["next_index"]})
+    _log_tick(shared_dir, room_id, "turn_skipped", "已跳过 {}".format(turn.get("agent_id", "")),
+              agent_id=turn.get("agent_id", ""))
+    _schedule(room_id)
+    return {**result, "action": "skipped", "to_agent": turn.get("agent_id", "")}
+
+
+def _deliver_turn(config, shared_dir, room_id, room_cfg, agent_cfg, turn, result):
+    """Call an adapter after the ``delivering`` state is durable."""
+    payload = dict(turn.get("delivery_payload") or {})
+    agent_id = turn.get("agent_id", "")
+    text = payload.get("message", "")
+    from_agents = payload.get("from", "")
     active = room_active_file(shared_dir, room_id)
-    messages = _messages_with_lines(active)
-    cursor = read_room_cursor(shared_dir, room_id, agent_id)
-    pending = _pending_for_agent(messages, agent_id, cursor)
-
-    if not pending:
-        # No pending messages — skip this agent, keep turn
-        _log_tick(shared_dir, room_id, "wakeup_skipped", f"未唤醒 {agent_id}：没有待处理的新消息", agent_id=agent_id)
-        # Check archive
-        from rooms import should_archive_room, archive_room
-        if should_archive_room(active):
-            archive_room(shared_dir, room_id)
-        write_room_state(shared_dir, room_id, state)
-        return {**result, "action": "no_pending", "to_agent": agent_id}
-
-    # ── Get agent config and check capability ──
-    agents_cfg = config.get("agents", {})
-    agent_cfg = agents_cfg.get(agent_id)
-    if not agent_cfg:
-        state["status"] = ROOM_ERROR
-        state["last_error"] = f"unknown agent: {agent_id}"
-        write_room_state(shared_dir, room_id, state)
-        emit_event(shared_dir, room_id, EVT_ROOM_ERROR, actor=agent_id, meta={"error": "unknown agent"})
-        return {**result, "action": "error", "error": f"unknown agent: {agent_id}"}
-
-    cap = adapter_capability(agent_cfg)
-    if not cap.get("automatic"):
-        # Manual agent — enter manual_required
-        state["current_turn"] = {
-            "turn_id": "",
-            "agent_id": agent_id,
-            "state": TURN_MANUAL_REQUIRED,
-            "started_at": _now_ts(),
-            "timeout_at": "",
-            "timeout_seconds": 0,
-            "input_message_ids": [m.get("id", "") for m in pending],
-            "input_line_max": max(_line_no(m) for m in pending) if pending else 0,
-            "response_message_id": "",
-            "attempts": 1,
-            "max_attempts": 1,
-            "last_error": "manual agent, cannot auto-trigger",
-        }
-        write_room_state(shared_dir, room_id, state)
-        _log_tick(shared_dir, room_id, "manual_required", f"{agent_id} 需要手动介入", level="warn", agent_id=agent_id)
-        return {**result, "action": "manual_required", "to_agent": agent_id}
-
-    # ── Create turn ──
-    # Determine timeout from adapter config
-    adapter = normalize_adapter(agent_cfg)
-    response_cfg = agent_cfg.get("adapter", {}).get("response", {})
-    if not response_cfg:
-        # Try top-level wakeup config for timeout
-        response_cfg = agent_cfg.get("wakeup", {})
-    timeout_seconds = int(response_cfg.get("timeout_seconds", 180))
-
-    turn = make_turn(room_id, agent_id, pending, timeout_seconds)
-    turn["state"] = TURN_WAITING_RESPONSE
-    turn["input_line_max"] = max(_line_no(m) for m in pending) if pending else 0
-
-    state["current_turn"] = turn
-    state["waiting_for"] = agent_id
-    state["waiting_line"] = len(messages)
-    write_room_state(shared_dir, room_id, state)
-
-    emit_event(shared_dir, room_id, EVT_TURN_SELECTED, actor=agent_id,
-               turn_id=turn["turn_id"], correlation_id=turn["correlation_id"],
-               meta={"turn_index": turn_index, "pending": len(pending)})
-
-    # ── Build delivery context ──
-    text = _format_delivery(pending)
-    callback_url = _callback_url(config, room_id, agent_id)
-    from_agents = ",".join(sorted({m.get("from", "") for m in pending if m.get("from")}))
-
     context = {
         "message": text,
         "from": from_agents,
@@ -237,339 +254,296 @@ def run_room_step(config, room_id):
         "room": room_id,
         "room_path": str(room_dir(shared_dir, room_id)),
         "active_file": str(active),
-        "turn_id": turn["turn_id"],
-        "correlation_id": turn["correlation_id"],
-        "callback_url": callback_url,
+        "turn_id": turn.get("turn_id", ""),
+        "correlation_id": turn.get("correlation_id", ""),
+        "callback_url": _callback_url(config, room_id, agent_id),
     }
 
-    # ── Deliver to adapter ──
     emit_event(shared_dir, room_id, EVT_AGENT_WAKEUP_REQUESTED, actor=agent_id,
-               turn_id=turn["turn_id"], correlation_id=turn["correlation_id"])
+               turn_id=turn.get("turn_id", ""), correlation_id=turn.get("correlation_id", ""),
+               meta={"attempt": turn.get("attempts", 1)})
+    _log_tick(shared_dir, room_id, "delivery_attempt", "准备投递给 {}".format(agent_id),
+              agent_id=agent_id, meta={"attempt": turn.get("attempts", 1), "messages": len(turn.get("input_message_ids", []))})
 
-    _log_tick(shared_dir, room_id, "delivery_attempt", f"准备唤醒/调用 {agent_id}，待投递消息 {len(pending)} 条",
-              agent_id=agent_id, meta={"adapter": cap.get("type"), "from": from_agents, "new_msgs": len(pending)})
-
-    t0 = _time.monotonic()
+    started = _time.monotonic()
     ticket = deliver_via_registry(agent_cfg, text, from_agents, context)
-    elapsed = round(_time.monotonic() - t0, 2)
-
-    delivered = ticket.get("ok", False)
-    detail = ticket.get("detail") or ticket.get("error", "")
-    response_body = ticket.get("sync_response", "")
+    elapsed = round(_time.monotonic() - started, 2)
+    delivered = bool(ticket.get("ok"))
     response_mode = ticket.get("response_mode", RESPONSE_CALLBACK)
+    detail = ticket.get("detail") or ticket.get("error", "")
+    sync_text = _extract_reply(ticket.get("sync_response", "")) if response_mode == RESPONSE_SYNC else None
 
-    if not delivered:
-        # Delivery failed
-        state["status"] = ROOM_ERROR
-        state["last_error"] = detail
-        turn["state"] = TURN_FAILED
-        turn["last_error"] = detail
-        state["current_turn"] = turn
-        write_room_state(shared_dir, room_id, state)
-        emit_event(shared_dir, room_id, EVT_AGENT_WAKEUP_FAILED, actor=agent_id,
-                   turn_id=turn["turn_id"], meta={"error": detail, "elapsed": elapsed})
-        _log_tick(shared_dir, room_id, "delivery_failed", f"调用 {agent_id} 失败（{elapsed}s）：{detail}",
-                  level="error", agent_id=agent_id)
-        return {**result, "action": "delivery_failed", "to_agent": agent_id, "error": detail}
+    def finish(state):
+        current = state.get("current_turn") or {}
+        if current.get("turn_id") != turn.get("turn_id"):
+            return {"stale": True}
+        if not delivered:
+            current["state"] = TURN_FAILED
+            current["last_error"] = detail
+            state["current_turn"] = current
+            state["status"] = ROOM_ERROR
+            state["last_error"] = detail
+            return {"stale": False, "failed": True}
 
-    # ── Delivery succeeded ──
-    emit_event(shared_dir, room_id, EVT_AGENT_WAKEUP_SUCCEEDED, actor=agent_id,
-               turn_id=turn["turn_id"], meta={"detail": detail, "elapsed": elapsed})
+        # Mark the input cursor once per turn, even when retrying delivery.
+        if not current.get("delivery_acknowledged"):
+            input_line_max = int(current.get("input_line_max", 0) or 0)
+            if input_line_max:
+                write_room_cursor(shared_dir, room_id, agent_id, input_line_max)
+            current["delivery_acknowledged"] = True
+            state["turn_count"] = int(state.get("turn_count", 0)) + 1
 
-    # Update cursor
-    latest_line = max(_line_no(m) for m in pending) if pending else 0
-    write_room_cursor(shared_dir, room_id, agent_id, latest_line)
-    state["turn_count"] = int(state.get("turn_count", 0)) + 1
-    state["last_error"] = ""
+        # A callback may have completed while the adapter request was in flight.
+        if current.get("response_message_id"):
+            current["state"] = TURN_WAITING_RESPONSE
+            state["current_turn"] = current
+            return {"stale": False, "callback_won": True}
 
-    # ── Handle response based on response_mode ──
-    if response_mode == RESPONSE_SYNC:
-        reply_text = _extract_reply(response_body)
-        if reply_text:
-            # Sync response — write message and complete turn
-            msg = append_room_message(shared_dir, room_id, agent_id, reply_text,
-                                       kind="agent", meta={"source": "sync_response"})
-            turn["state"] = TURN_COMPLETED
-            turn["response_message_id"] = msg.get("id", "")
-            state["current_turn"] = turn
+        if sync_text:
+            msg = append_room_message(
+                shared_dir, room_id, agent_id, sync_text, kind="agent",
+                reply_to=current.get("turn_id", ""), correlation_id=current.get("correlation_id", ""),
+                meta={"source": "sync_response"},
+            )
+            current["response_message_id"] = msg.get("id", "")
             state["last_message_id"] = msg.get("id", "")
+            current["sync_response"] = True
 
-            emit_event(shared_dir, room_id, EVT_AGENT_RESPONSE_RECEIVED, actor=agent_id,
-                       turn_id=turn["turn_id"], correlation_id=turn["correlation_id"],
-                       message_id=msg.get("id", ""), meta={"source": "sync", "elapsed": elapsed})
-
-            # Advance turn
-            next_index = (turn_index + 1) % len(order)
-            state["turn_index"] = next_index
-            state["round"] = int(state.get("round", 0)) + (1 if next_index == 0 else 0)
-            state["waiting_for"] = ""
-            state["waiting_line"] = 0
-            state["current_turn"] = None
-            write_room_state(shared_dir, room_id, state)
-
-            emit_event(shared_dir, room_id, EVT_TURN_COMPLETED, actor=agent_id,
-                       turn_id=turn["turn_id"], meta={"next_turn_index": next_index})
-
-            _log_tick(shared_dir, room_id, "delivery_succeeded",
-                      f"已成功唤醒 {agent_id}（{elapsed}s）并收到同步回复",
-                      agent_id=agent_id, meta={"cursor": latest_line, "elapsed": elapsed})
-
-            # Schedule next step
-            try:
-                from scheduler import get_scheduler
-                get_scheduler().schedule_room(room_id)
-            except Exception:
-                pass
-
-            return {**result, "action": "sync_response", "to_agent": agent_id,
-                    "delivered": True, "response_auto_written": True}
-
-        else:
-            # Sync response was empty or unparseable — log and advance anyway
-            _log_tick(shared_dir, room_id, "sync_empty",
-                      f"{agent_id} 同步回复为空或无法解析",
-                      level="warn", agent_id=agent_id,
-                      meta={"raw_response": response_body[:200] if response_body else ""})
-            # Still advance turn to avoid stuck state
-            next_index = (turn_index + 1) % len(order)
-            state["turn_index"] = next_index
-            state["round"] = int(state.get("round", 0)) + (1 if next_index == 0 else 0)
-            state["waiting_for"] = ""
-            state["waiting_line"] = 0
-            turn["state"] = TURN_COMPLETED
-            turn["last_error"] = "sync response empty"
-            state["current_turn"] = None
-            write_room_state(shared_dir, room_id, state)
-            return {**result, "action": "sync_empty", "to_agent": agent_id,
-                    "delivered": True, "response_auto_written": False}
-
-    elif response_mode == RESPONSE_MCP_TOOL:
-        # MCP tool response: instructions rendered, but not a real agent reply.
-        # Enter waiting_response — external system will invoke callback.
-        turn["state"] = TURN_WAITING_RESPONSE
-        state["current_turn"] = turn
+        current["state"] = TURN_WAITING_RESPONSE
+        current["last_error"] = ""
+        state["current_turn"] = current
         state["waiting_for"] = agent_id
-        state["waiting_line"] = len(messages)
-        write_room_state(shared_dir, room_id, state)
+        state["waiting_line"] = int(current.get("input_line_max", 0) or 0)
+        state["last_error"] = ""
+        return {"stale": False, "sync": bool(sync_text), "response_message_id": current.get("response_message_id", "")}
 
-        _log_tick(shared_dir, room_id, "delivery_succeeded",
-                  f"已成功投递 MCP 工具指令到 {agent_id}（{elapsed}s），等待外部回调",
-                  agent_id=agent_id, meta={"cursor": latest_line, "elapsed": elapsed,
-                                           "response_mode": response_mode})
+    saved_state, outcome = mutate_room_state(shared_dir, room_id, room_cfg, finish)
+    if outcome.get("stale"):
+        return {**result, "action": "stale", "to_agent": agent_id}
+    if outcome.get("failed"):
+        emit_event(shared_dir, room_id, EVT_AGENT_WAKEUP_FAILED, actor=agent_id,
+                   turn_id=turn.get("turn_id", ""), meta={"error": detail, "elapsed": elapsed})
+        _log_tick(shared_dir, room_id, "delivery_failed", "调用 {} 失败：{}".format(agent_id, detail),
+                  level="error", agent_id=agent_id)
+        return {**result, "ok": False, "action": "delivery_failed", "to_agent": agent_id, "error": detail}
 
-        return {**result, "action": "waiting", "to_agent": agent_id,
-                "delivered": True, "waiting_for": agent_id}
-
-    else:
-        # callback, file_outbox, pull_session, manual, none:
-        # No sync response — enter waiting_response
-        turn["state"] = TURN_WAITING_RESPONSE
-        state["current_turn"] = turn
-        state["waiting_for"] = agent_id
-        state["waiting_line"] = len(messages)
-        write_room_state(shared_dir, room_id, state)
-
-        _log_tick(shared_dir, room_id, "delivery_succeeded",
-                  f"已成功唤醒 {agent_id}（{elapsed}s），等待异步回复",
-                  agent_id=agent_id, meta={"cursor": latest_line, "elapsed": elapsed,
-                                           "response_mode": response_mode})
-
-        return {**result, "action": "waiting", "to_agent": agent_id,
-                "delivered": True, "waiting_for": agent_id}
+    emit_event(shared_dir, room_id, EVT_AGENT_WAKEUP_SUCCEEDED, actor=agent_id,
+               turn_id=turn.get("turn_id", ""), correlation_id=turn.get("correlation_id", ""),
+               meta={"detail": detail, "elapsed": elapsed, "response_mode": response_mode})
+    fresh_turn = saved_state.get("current_turn") or {}
+    _log_tick(shared_dir, room_id, "delivery_succeeded", "已成功投递给 {}，等待回复".format(agent_id),
+              agent_id=agent_id, meta={"elapsed": elapsed, "response_mode": response_mode})
+    _schedule(room_id, fresh_turn.get("timeout_at", ""))
+    return {**result, "action": "sync_response" if outcome.get("sync") else "waiting",
+            "to_agent": agent_id, "delivered": True, "waiting_for": agent_id,
+            "response_auto_written": bool(outcome.get("sync"))}
 
 
-# ── Turn completion ─────────────────────────────────────
-
-def _complete_turn_and_advance(shared_dir, config, room_id, room_cfg, state, turn, result):
-    """Complete a turn that has received a response and advance to next agent."""
-    order = room_cfg.get("order", [])
-    agent_id = turn.get("agent_id", "")
-
-    turn["state"] = TURN_COMPLETED
-    turn_index = int(state.get("turn_index", 0)) % len(order) if order else 0
-
-    next_index = (turn_index + 1) % len(order) if order else 0
-    state["turn_index"] = next_index
-    state["round"] = int(state.get("round", 0)) + (1 if next_index == 0 else 0)
-    state["waiting_for"] = ""
-    state["waiting_line"] = 0
-    state["current_turn"] = None
-    state["last_error"] = ""
-
-    emit_event(shared_dir, room_id, EVT_TURN_COMPLETED, actor=agent_id,
-               turn_id=turn.get("turn_id", ""), meta={"next_turn_index": next_index})
-
-    write_room_state(shared_dir, room_id, state)
-
-    _log_tick(shared_dir, room_id, "response_seen",
-              f"已检测到 {agent_id} 的回复，下一轮将进入后续 Agent",
-              agent_id=agent_id, meta={"message_id": turn.get("response_message_id", "")})
-
-    # Schedule next step
-    try:
-        from scheduler import get_scheduler
-        get_scheduler().schedule_room(room_id)
-    except Exception:
-        pass
-
-    return {**result, "action": "response_received", "to_agent": agent_id}
-
-
-# ── Timeout handling ────────────────────────────────────
-
-def _handle_timeout(shared_dir, config, room_id, room_cfg, state, turn, result):
-    """Handle a timed-out turn based on room policy."""
-    agent_id = turn.get("agent_id", "")
-    order = room_cfg.get("order", [])
-    turn_index = int(state.get("turn_index", 0)) % len(order) if order else 0
-
-    # Get timeout policy from room config
+def _handle_timeout(config, shared_dir, room_id, room_cfg, agent_cfg, turn, result):
     policy = room_cfg.get("policy", {})
-    if isinstance(policy, dict):
-        on_timeout = policy.get("on_timeout", "skip")
-    else:
-        on_timeout = "skip"
-
+    on_timeout = policy.get("on_timeout", "skip") if isinstance(policy, dict) else "skip"
+    agent_id = turn.get("agent_id", "")
     emit_event(shared_dir, room_id, EVT_TURN_TIMEOUT, actor=agent_id,
                turn_id=turn.get("turn_id", ""), meta={"on_timeout": on_timeout})
-
-    _log_tick(shared_dir, room_id, "turn_timeout",
-              f"{agent_id} 超时未回复，执行策略：{on_timeout}",
+    _log_tick(shared_dir, room_id, "turn_timeout", "{} 超时未回复，执行 {}".format(agent_id, on_timeout),
               level="warn", agent_id=agent_id)
 
-    if on_timeout == "skip":
-        return _skip_turn(shared_dir, room_id, order, state, turn, turn_index, result)
-    elif on_timeout == "retry":
-        # Check retry limit
-        attempts = int(turn.get("attempts", 1))
-        max_attempts = int(turn.get("max_attempts", 2))
+    if on_timeout == "retry":
+        attempts = int(turn.get("attempts", 1) or 1)
+        max_attempts = int(turn.get("max_attempts", 2) or 2)
         if attempts < max_attempts:
-            turn["attempts"] = attempts + 1
-            turn["state"] = TURN_WAITING_RESPONSE
-            # Reset timeout
-            timeout_seconds = int(turn.get("timeout_seconds", 180))
-            from datetime import timedelta
-            turn["timeout_at"] = (datetime.now() + timedelta(seconds=timeout_seconds)).strftime("%Y-%m-%d %H:%M:%S")
-            state["current_turn"] = turn
-            write_room_state(shared_dir, room_id, state)
-            _log_tick(shared_dir, room_id, "turn_retry", f"重试 {agent_id}（第 {attempts + 1} 次）", agent_id=agent_id)
-            # Re-deliver
-            return run_room_step(config, room_id)
-        else:
-            return _skip_turn(shared_dir, room_id, order, state, turn, turn_index, result)
-    elif on_timeout == "pause":
-        state["status"] = ROOM_PAUSED
-        state["current_turn"] = None
-        state["waiting_for"] = ""
-        state["waiting_line"] = 0
-        state["last_error"] = f"turn timeout: {agent_id}"
-        write_room_state(shared_dir, room_id, state)
-        emit_event(shared_dir, room_id, EVT_ROOM_PAUSED, meta={"reason": "timeout"})
-        return {**result, "action": "paused", "error": f"timeout: {agent_id}"}
-    elif on_timeout == "error":
-        state["status"] = ROOM_ERROR
-        state["current_turn"] = None
-        state["last_error"] = f"turn timeout: {agent_id}"
-        write_room_state(shared_dir, room_id, state)
-        emit_event(shared_dir, room_id, EVT_ROOM_ERROR, meta={"error": "timeout"})
-        return {**result, "action": "error", "error": f"timeout: {agent_id}"}
-    elif on_timeout == "manual":
-        turn["state"] = TURN_MANUAL_REQUIRED
-        turn["last_error"] = "timeout, manual intervention required"
-        state["current_turn"] = turn
-        write_room_state(shared_dir, room_id, state)
-        return {**result, "action": "manual_required", "to_agent": agent_id}
-    else:
-        return _skip_turn(shared_dir, room_id, order, state, turn, turn_index, result)
+            retry_turn = {}
+
+            def retry(state):
+                current = state.get("current_turn") or {}
+                if current.get("turn_id") != turn.get("turn_id") or current.get("response_message_id"):
+                    return {"stale": True}
+                current["attempts"] = attempts + 1
+                current["delivery_id"] = gen_delivery_id()
+                current["state"] = TURN_DELIVERING
+                current["timeout_at"] = _timeout_at(current.get("timeout_seconds", 180))
+                state["current_turn"] = current
+                state["waiting_for"] = agent_id
+                retry_turn.update(current)
+                return {"stale": False}
+
+            _state, outcome = mutate_room_state(shared_dir, room_id, room_cfg, retry)
+            if not outcome.get("stale"):
+                _log_tick(shared_dir, room_id, "turn_retry", "重试 {}（第 {} 次）".format(agent_id, attempts + 1), agent_id=agent_id)
+                return _deliver_turn(config, shared_dir, room_id, room_cfg, agent_cfg, retry_turn, result)
+        return _skip_turn(shared_dir, room_id, room_cfg, turn, result)
+    if on_timeout == "pause":
+        return _pause_or_error(shared_dir, room_id, room_cfg, turn, "pause", result)
+    if on_timeout == "error":
+        return _pause_or_error(shared_dir, room_id, room_cfg, turn, "error", result)
+    if on_timeout == "manual":
+        def manual(state):
+            current = state.get("current_turn") or {}
+            if current.get("turn_id") != turn.get("turn_id"):
+                return {"stale": True}
+            current["state"] = TURN_MANUAL_REQUIRED
+            current["last_error"] = "timeout, manual intervention required"
+            state["current_turn"] = current
+            return {"stale": False}
+        _state, outcome = mutate_room_state(shared_dir, room_id, room_cfg, manual)
+        return {**result, "action": "manual_required" if not outcome.get("stale") else "stale", "to_agent": agent_id}
+    return _skip_turn(shared_dir, room_id, room_cfg, turn, result)
 
 
-def _skip_turn(shared_dir, room_id, order, state, turn, turn_index, result):
-    """Skip the current turn and advance to next agent."""
-    agent_id = turn.get("agent_id", "")
-    turn["state"] = TURN_SKIPPED
+def run_room_step(config, room_id):
+    """Execute one safe V2 state-machine step for a room."""
+    shared_dir = _shared_dir(config)
+    rooms_cfg = config.get("rooms", {}) or {}
+    result = {"ok": True, "room_id": room_id, "action": "noop"}
+    if room_id not in rooms_cfg:
+        return {**result, "ok": False, "error": "room not found"}
 
-    next_index = (turn_index + 1) % len(order) if order else 0
-    state["turn_index"] = next_index
-    state["round"] = int(state.get("round", 0)) + (1 if next_index == 0 else 0)
-    state["waiting_for"] = ""
-    state["waiting_line"] = 0
-    state["current_turn"] = None
-    state["last_error"] = ""
+    room_cfg = normalize_room({**rooms_cfg[room_id], "id": room_id})
+    ensure_room(shared_dir, room_cfg)
+    state = read_room_state_consistent(shared_dir, room_id, room_cfg)
+    if state.get("status") != ROOM_RUNNING:
+        return {**result, "error": "room not running"}
 
-    emit_event(shared_dir, room_id, EVT_TURN_SKIPPED, actor=agent_id,
-               turn_id=turn.get("turn_id", ""), meta={"next_turn_index": next_index})
+    if int(state.get("turn_count", 0)) >= int(room_cfg.get("max_turns", 50)):
+        def pause_for_limit(current):
+            current["status"] = ROOM_PAUSED
+            current["last_error"] = "max_turns reached"
+            return True
+        mutate_room_state(shared_dir, room_id, room_cfg, pause_for_limit)
+        emit_event(shared_dir, room_id, EVT_ROOM_PAUSED, meta={"reason": "max_turns"})
+        return {**result, "action": "paused", "error": "max_turns reached"}
 
-    write_room_state(shared_dir, room_id, state)
+    current_turn = state.get("current_turn") or {}
+    current_state = current_turn.get("state")
+    if current_turn:
+        if current_state == TURN_DELIVERING:
+            return {**result, "action": "delivering", "waiting_for": current_turn.get("agent_id", "")}
+        if current_state == TURN_WAITING_RESPONSE:
+            if current_turn.get("response_message_id"):
+                return _finish_completed_turn(shared_dir, room_id, room_cfg, current_turn, result)
+            deadline = _parse_ts(current_turn.get("timeout_at", ""))
+            if deadline and datetime.now() >= deadline:
+                agent_cfg = (config.get("agents", {}) or {}).get(current_turn.get("agent_id", ""), {})
+                return _handle_timeout(config, shared_dir, room_id, room_cfg, agent_cfg, current_turn, result)
+            _schedule(room_id, current_turn.get("timeout_at", ""))
+            return {**result, "action": "waiting", "waiting_for": current_turn.get("agent_id", "")}
+        if current_state in (TURN_MANUAL_REQUIRED, TURN_FAILED):
+            return {**result, "action": current_state, "waiting_for": current_turn.get("agent_id", "")}
 
-    _log_tick(shared_dir, room_id, "turn_skipped", f"已跳过 {agent_id}", agent_id=agent_id)
+    order = room_cfg.get("order", [])
+    if not order:
+        def no_agents(current):
+            current["status"] = ROOM_ERROR
+            current["last_error"] = "room has no agents"
+            return True
+        mutate_room_state(shared_dir, room_id, room_cfg, no_agents)
+        emit_event(shared_dir, room_id, EVT_ROOM_ERROR, meta={"error": "no agents"})
+        return {**result, "ok": False, "action": "error", "error": "no agents"}
 
-    # Schedule next step
-    try:
-        from scheduler import get_scheduler
-        get_scheduler().schedule_room(room_id)
-    except Exception:
-        pass
+    messages = _messages_with_lines(room_active_file(shared_dir, room_id))
+    agent_id, selected_index, pending = _select_pending(shared_dir, room_id, room_cfg, state, messages)
+    if not pending:
+        return {**result, "action": "no_pending"}
 
-    return {**result, "action": "skipped", "to_agent": agent_id}
+    agent_cfg = (config.get("agents", {}) or {}).get(agent_id)
+    if not agent_cfg:
+        return {**result, "ok": False, "action": "error", "error": "unknown agent: {}".format(agent_id)}
+
+    cap = adapter_capability(agent_cfg)
+    if not cap.get("automatic"):
+        def require_manual(current):
+            if current.get("current_turn"):
+                return {"busy": True}
+            current["current_turn"] = {
+                "turn_id": "", "agent_id": agent_id, "state": TURN_MANUAL_REQUIRED,
+                "started_at": _now_ts(), "timeout_at": "", "timeout_seconds": 0,
+                "input_message_ids": [item.get("id", "") for item in pending],
+                "input_line_max": max(_line_no(item) for item in pending),
+                "response_message_id": "", "attempts": 1, "max_attempts": 1,
+                "last_error": "manual agent, cannot auto-trigger", "turn_index": selected_index,
+            }
+            return {"busy": False}
+        _state, outcome = mutate_room_state(shared_dir, room_id, room_cfg, require_manual)
+        return {**result, "action": "manual_required" if not outcome.get("busy") else "busy", "to_agent": agent_id}
+
+    response_cfg = (agent_cfg.get("adapter", {}) or {}).get("response", {}) or agent_cfg.get("wakeup", {}) or {}
+    timeout_seconds = int(response_cfg.get("timeout_seconds", 180))
+    turn = make_turn(room_id, agent_id, pending, timeout_seconds)
+    turn["state"] = TURN_DELIVERING
+    turn["turn_index"] = selected_index
+    turn["input_line_max"] = max(_line_no(item) for item in pending)
+    turn["delivery_payload"] = {
+        "message": _format_delivery(pending),
+        "from": ",".join(sorted({item.get("from", "") for item in pending if item.get("from")})),
+    }
+    turn["adapter_type"] = cap.get("type", "")
+
+    def begin_delivery(current):
+        if current.get("current_turn"):
+            return {"busy": True}
+        current["current_turn"] = turn
+        current["waiting_for"] = agent_id
+        current["waiting_line"] = turn["input_line_max"]
+        current["last_error"] = ""
+        return {"busy": False}
+
+    _state, outcome = mutate_room_state(shared_dir, room_id, room_cfg, begin_delivery)
+    if outcome.get("busy"):
+        return {**result, "action": "busy"}
+
+    emit_event(shared_dir, room_id, EVT_TURN_SELECTED, actor=agent_id,
+               turn_id=turn["turn_id"], correlation_id=turn["correlation_id"],
+               meta={"turn_index": selected_index, "pending": len(pending)})
+    return _deliver_turn(config, shared_dir, room_id, room_cfg, agent_cfg, turn, result)
 
 
-# ── Receive agent response (called by callback API / MCP / file_outbox watcher) ──
+def receive_agent_response(shared_dir, room_id, agent_id, message_text, turn_id="", correlation_id="", source="callback", meta=None):
+    """Accept one callback with strict turn validation and idempotency."""
+    accepted = {}
 
-def receive_agent_response(shared_dir, room_id, agent_id, message_text,
-                           turn_id="", correlation_id="", source="callback", meta=None):
-    """Process an incoming response from an Agent.
+    def receive(state):
+        current = state.get("current_turn") or {}
+        if not current:
+            if turn_id or correlation_id:
+                return {"ok": False, "error": "stale callback: no active turn", "persist": False}
+            msg = append_room_message(shared_dir, room_id, agent_id, message_text, kind="agent", meta={"source": source, **(meta or {})})
+            accepted.update({"message_id": msg.get("id", ""), "free": True})
+            return {"ok": True, "free": True}
+        if current.get("agent_id") != agent_id:
+            return {"ok": False, "error": "current turn belongs to {}, not {}".format(current.get("agent_id", ""), agent_id), "persist": False}
+        if turn_id and current.get("turn_id") != turn_id:
+            return {"ok": False, "error": "turn_id mismatch", "persist": False}
+        if correlation_id and current.get("correlation_id") != correlation_id:
+            return {"ok": False, "error": "correlation_id mismatch", "persist": False}
+        if current.get("response_message_id"):
+            return {"ok": True, "duplicate": True, "message_id": current.get("response_message_id", "")}
+        msg = append_room_message(
+            shared_dir, room_id, agent_id, message_text, kind="agent",
+            reply_to=current.get("turn_id", ""), correlation_id=current.get("correlation_id", ""),
+            meta={"source": source, **(meta or {})},
+        )
+        current["response_message_id"] = msg.get("id", "")
+        current["state"] = TURN_WAITING_RESPONSE
+        state["current_turn"] = current
+        state["last_message_id"] = msg.get("id", "")
+        accepted.update({"message_id": msg.get("id", ""), "turn": dict(current)})
+        return {"ok": True, "duplicate": False}
 
-    This is the unified entry point for all response channels:
-    HTTP callback, MCP reply_turn, file_outbox watcher.
+    state, outcome = mutate_room_state(shared_dir, room_id, None, receive)
+    if outcome.get("persist") is False:
+        # mutate_room_state persisted only its revision by default; restore no-op semantics on invalid callback.
+        # The response is still rejected, and no message was appended.
+        return {"ok": False, "error": outcome.get("error", "callback rejected")}
+    if not outcome.get("ok"):
+        return {"ok": False, "error": outcome.get("error", "callback rejected")}
+    if outcome.get("duplicate"):
+        return {"ok": True, "duplicate": True, "message_id": outcome.get("message_id", ""), "scheduled": False}
 
-    Returns a result dict with ok / message_id / scheduled.
-    """
-    rooms_cfg = {}  # Not needed here, we read state directly
-    state = read_room_state(shared_dir, room_id)
-    state = migrate_room_state(state)
-
-    current_turn = state.get("current_turn")
-    if not current_turn:
-        # No active turn — write as a free agent message
-        msg = append_room_message(shared_dir, room_id, agent_id, message_text,
-                                   kind="agent", meta={"source": source, **(meta or {})})
-        return {"ok": True, "message_id": msg.get("id", ""), "scheduled": False, "note": "no active turn"}
-
-    # Validate turn
-    if current_turn.get("agent_id") != agent_id:
-        return {"ok": False, "error": f"current turn belongs to {current_turn.get('agent_id')}, not {agent_id}"}
-
-    if turn_id and current_turn.get("turn_id") != turn_id:
-        return {"ok": False, "error": "turn_id mismatch"}
-
-    if correlation_id and current_turn.get("correlation_id") != correlation_id:
-        return {"ok": False, "error": "correlation_id mismatch"}
-
-    # Write message
-    msg = append_room_message(shared_dir, room_id, agent_id, message_text,
-                               kind="agent",
-                               reply_to=current_turn.get("turn_id", ""),
-                               correlation_id=current_turn.get("correlation_id", ""),
-                               meta={"source": source, **(meta or {})})
-
-    # Mark response received
-    current_turn["response_message_id"] = msg.get("id", "")
-    state["current_turn"] = current_turn
-    state["last_message_id"] = msg.get("id", "")
-    write_room_state(shared_dir, room_id, state)
-
-    # Emit event
-    emit_event(shared_dir, room_id, EVT_AGENT_RESPONSE_RECEIVED, actor=agent_id,
-               turn_id=current_turn.get("turn_id", ""),
-               correlation_id=current_turn.get("correlation_id", ""),
-               message_id=msg.get("id", ""), meta={"source": source})
-
-    # Schedule next step
-    try:
-        from scheduler import get_scheduler
-        get_scheduler().schedule_room(room_id)
-        scheduled = True
-    except Exception:
-        scheduled = False
-
-    return {"ok": True, "message_id": msg.get("id", ""), "scheduled": scheduled}
+    if not outcome.get("free"):
+        current = accepted.get("turn") or {}
+        emit_event(shared_dir, room_id, EVT_AGENT_RESPONSE_RECEIVED, actor=agent_id,
+                   turn_id=current.get("turn_id", ""), correlation_id=current.get("correlation_id", ""),
+                   message_id=accepted.get("message_id", ""), meta={"source": source})
+    _schedule(room_id)
+    return {"ok": True, "message_id": accepted.get("message_id", ""), "scheduled": True,
+            "note": "no active turn" if outcome.get("free") else ""}
