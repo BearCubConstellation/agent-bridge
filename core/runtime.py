@@ -67,7 +67,7 @@ def _callback_base_url(config):
     """Build the base URL for agent callbacks."""
     server_cfg = config.get("server", {})
     host = server_cfg.get("host", "127.0.0.1")
-    port = server_cfg.get("port", 7899)
+    port = server_cfg.get("port", 8825)
     return f"http://{host}:{port}"
 
 

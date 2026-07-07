@@ -11,6 +11,30 @@ const THEME_KEY = 'agentBridgeTheme';
 const POLL_FAST = 3000;   // 房间视图内：turn 状态频繁刷新
 const POLL_BASE = 5000;   // 默认轮询间隔
 
+/* ── Agent 分类（按已知 ID / 名称自动打标签） ── */
+const AGENT_CATEGORY = {
+  general: { label: '通用 Agent',  ids: ['openclaw', 'hermes', 'cherry studio', 'cherrystudio', 'cherry'] },
+  coding:  { label: 'Coding Agent', ids: ['claude code', 'claudecode', 'claude', 'opencode', 'open-code'] },
+};
+
+function categorizeAgent(agent) {
+  if (!agent) return null;
+  const id = (agent.id || '').toLowerCase();
+  const name = (agent.display_name || '').toLowerCase();
+  const haystack = `${id} ${name}`;
+  for (const [key, info] of Object.entries(AGENT_CATEGORY)) {
+    if (info.ids.some(k => haystack.includes(k))) return key;
+  }
+  return null;
+}
+
+function categoryBadge(category) {
+  if (!category) return '';
+  const label = AGENT_CATEGORY[category].label;
+  const cls = category === 'coding' ? 'badge-coding' : 'badge-general';
+  return `<span class="badge ${cls}">${esc(label)}</span>`;
+}
+
 /* ═══ 工具函数 ═══════════════════════════════════════════════════ */
 const $  = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => Array.from(root.querySelectorAll(s));
@@ -396,6 +420,7 @@ const Renderer = {
         <div class="room-card-foot">
           <div class="room-card-actions">
             ${canControl ? `<button class="btn btn-sm ${isRunning ? '' : 'btn-primary'}" data-action="toggleRoom" data-room-id="${escAttr(room.id)}" data-status="${escAttr(status)}">${isRunning ? '暂停' : '开始'}</button>` : ''}
+            ${!isRunning ? `<button class="btn btn-sm btn-ghost" data-action="deleteRoom" data-room-id="${escAttr(room.id)}" data-room-name="${escAttr(room.name || room.id)}" title="删除聊天室">删除</button>` : ''}
           </div>
           <button class="btn btn-sm btn-ghost" data-action="openRoom" data-room-id="${escAttr(room.id)}">进入 →</button>
         </div>
@@ -610,11 +635,13 @@ const Renderer = {
   tplAgentCard(a) {
     const adapter = a.adapter || {};
     const type = adapter.type || 'manual';
+    const category = categorizeAgent(a);
     return `
       <div class="agent-card" data-agent-card="${escAttr(a.id)}">
         <div class="agent-card-head">
           <span class="agent-chip agent-chip-lg" style="background:${escAttr(a.color)}">${esc(initials(a.display_name, a.id))}</span>
           <div class="agent-card-name">${esc(a.display_name)}</div>
+          ${categoryBadge(category)}
           <span class="agent-card-id">@${esc(a.id)}</span>
         </div>
         <div class="agent-card-form">
@@ -950,6 +977,24 @@ const Actions = {
       await Poller.refresh();
     } else {
       Components.toast(res.error || '操作失败', 'error');
+    }
+  },
+
+  async deleteRoom(roomId, roomName) {
+    const confirmed = await Components.confirm(
+      `确认删除聊天室「${roomName}」？\n该房间内的所有消息将永久丢失，无法恢复。`,
+      { title: '删除聊天室', okLabel: '删除', danger: true }
+    );
+    if (!confirmed) return;
+    const res = await api('/api/rooms/delete', { method: 'POST', body: { id: roomId } });
+    if (res.ok) {
+      Components.toast('已删除');
+      // 若正在该房间会话视图，返回网格
+      if (Store.state.currentRoomId === roomId) Router.goChat();
+      await Poller.refresh();
+    } else {
+      // 运行中不能删等错误
+      Components.toast(res.error || '删除失败', 'error');
     }
   },
 
@@ -1343,6 +1388,9 @@ const Events = {
       const id = target.dataset.roomId;
       const status = target.dataset.status;
       if (id && status) Actions.toggleRoom(id, status);
+    },
+    deleteRoom(target) {
+      Actions.deleteRoom(target.dataset.roomId, target.dataset.roomName);
     },
     tickRoom(target) { Actions.tickRoom(target.dataset.roomId); },
     backToRooms() { Actions.backToRooms(); },

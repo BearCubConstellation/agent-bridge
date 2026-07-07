@@ -1393,7 +1393,7 @@ def handle_get_settings(handler):
     settings = _read_settings(shared_dir)
 
     # Determine port from the server socket
-    port = 7899
+    port = 8825
     try:
         port = handler.server.server_address[1]
     except Exception:

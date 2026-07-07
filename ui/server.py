@@ -6,7 +6,7 @@ Agent Bridge — 本地 UI 服务（精简入口）
 只需要跑这一个进程。
 
 用法:
-    python3 server.py                          # 默认 7899 端口
+    python3 server.py                          # 默认 8825 端口
     python3 server.py --open                   # 自动打开浏览器
     python3 server.py --poll-interval 60       # 每 60 秒轮询一次
 """
@@ -137,7 +137,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description="Agent Bridge — UI + polling server")
     parser.add_argument("--dir", "-d", help="Shared chat directory (auto-detect)")
-    parser.add_argument("--port", "-p", type=int, default=7899, help="Port (default: 7899)")
+    parser.add_argument("--port", "-p", type=int, default=8825, help="Port (default: 8825)")
     parser.add_argument("--host", default="127.0.0.1", help="Bind (default: 127.0.0.1)")
     parser.add_argument("--open", "-o", action="store_true", help="Open browser")
     parser.add_argument("--poll-interval", type=int, default=DEFAULT_POLL_INTERVAL,

@@ -1475,7 +1475,7 @@ class TestHelperFunctions(unittest.TestCase):
 
         config = {"server": {}}
         result = _callback_base_url(config)
-        self.assertEqual(result, "http://127.0.0.1:7899")
+        self.assertEqual(result, "http://127.0.0.1:8825")
 
     def test_callback_base_url_custom(self):
         """自定义 server 配置的 callback_base_url。"""

@@ -608,6 +608,20 @@ html[data-theme="dark"] .logo-dark  { display: block; }
 .badge-status.error    { color: var(--status-error);    background: rgba(196, 69, 69, 0.10); }
 .badge-status.archived { color: var(--status-archived); background: rgba(139, 152, 144, 0.12); }
 
+/* ── Agent 分类标签 ── */
+.badge-general {
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.10);
+  border-color: transparent;
+}
+.badge-coding {
+  color: #be123c;
+  background: rgba(190, 18, 60, 0.10);
+  border-color: transparent;
+}
+html[data-theme="dark"] .badge-general { color: #6FA0FF; background: rgba(111, 160, 255, 0.12); }
+html[data-theme="dark"] .badge-coding   { color: #FF8AA0; background: rgba(255, 138, 160, 0.12); }
+
 /* ── Agent chip（小圆形头像） ── */
 .agent-chip {
   display: inline-flex;
