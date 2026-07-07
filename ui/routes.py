@@ -527,6 +527,119 @@ def handle_update_config_full(handler):
                         "message": "config saved"})
 
 
+def handle_update_single_agent(handler, agent_id):
+    """PUT /api/agents/{agent_id} — update a single agent in-place.
+
+    Supports renaming (old_id in body), display_name, color, cursor,
+    filter_from, wakeup, adapter. Avoids the "full replace" pattern
+    where the frontend has to POST all agents just to edit one.
+
+    Blocked if agent is used by running rooms (rename/delete only).
+    """
+    if not validate_agent_id(agent_id):
+        _send_json(handler, {"ok": False, "error": "invalid agent_id"})
+        return
+    body, err = _read_json_body(handler)
+    if err:
+        _send_json(handler, err)
+        return
+
+    shared = Path(handler.shared_dir)
+    cfg, config_path = read_bridge(shared)
+    agents = cfg.get("agents", {})
+
+    old_id = (body.get("old_id") or "").strip()
+    new_id = (body.get("id") or agent_id).strip()
+    if not validate_agent_id(new_id):
+        _send_json(handler, {"ok": False, "error": "invalid id"})
+        return
+
+    # Rename path
+    target_key = agent_id
+    if old_id and old_id != new_id and old_id in agents:
+        blockers = running_rooms_using_agents(shared, cfg, {old_id})
+        if blockers:
+            rooms = ", ".join(room_label(room) for room in blockers)
+            _send_json(handler, {
+                "ok": False,
+                "error": f"agent rename blocked by running room(s): {rooms}",
+            })
+            return
+        target_key = old_id
+
+    if target_key not in agents:
+        _send_json(handler, {"ok": False, "error": f"agent not found: '{agent_id}'"})
+        return
+
+    # Apply field updates
+    agent = agents[target_key]
+    rename_performed = False
+    if new_id != target_key:
+        # rename
+        del agents[target_key]
+        agent["id"] = new_id
+        agents[new_id] = agent
+        rename_cursor(shared, target_key, new_id)
+        rename_agent_in_rooms(shared, cfg, target_key, new_id)
+        if cfg.get("agent_id") == target_key:
+            cfg["agent_id"] = new_id
+        rename_performed = True
+
+    if "display_name" in body:
+        agent["display_name"] = (body.get("display_name") or agent["id"]).strip() or agent["id"]
+    if "color" in body:
+        color = (body.get("color") or "").strip()
+        if re.match(r'^#[0-9a-fA-F]{6}$', color):
+            agent["color"] = color
+    if "cursor" in body:
+        agent["cursor"] = body.get("cursor") or "line"
+    if "filter_from" in body:
+        agent["filter_from"] = body.get("filter_from") or ""
+
+    # Wakeup / adapter
+    if "wakeup" in body:
+        wu = body.get("wakeup") or {}
+        wakeup = {
+            "url": wu.get("url", ""),
+            "method": wu.get("method", "POST"),
+            "headers": wu.get("headers", {"Content-Type": "application/json"}),
+            "body_template": wu.get("body_template", {"message": "{{message}}"}),
+        }
+        auth = wu.get("auth")
+        if auth and auth.get("type") == "bearer":
+            if auth.get("token_path"):
+                wakeup["auth"] = {
+                    "type": "bearer",
+                    "token_path": auth["token_path"],
+                    "token_jsonpath": auth.get("token_jsonpath", ""),
+                }
+            elif auth.get("token_env"):
+                wakeup["auth"] = {"type": "bearer", "token_env": auth["token_env"]}
+        agent["wakeup"] = wakeup
+        agent["adapter"] = body.get("adapter") or wakeup_to_adapter(wakeup)
+    elif "adapter" in body:
+        adapter = body.get("adapter") or {}
+        agent["adapter"] = adapter
+        # keep wakeup in sync for backward compat
+        agent["wakeup"] = adapter_to_wakeup(adapter)
+
+    sync_filter_from(cfg)
+    if cfg.get("agent_id") not in cfg.get("agents", {}):
+        cfg["agent_id"] = next(iter(cfg.get("agents", {}).keys()), "")
+    write_bridge(config_path, cfg)
+
+    _send_json(handler, {
+        "ok": True,
+        "agent": {
+            "id": agent["id"],
+            "display_name": agent.get("display_name", agent["id"]),
+            "color": agent.get("color", "#8888a0"),
+        },
+        "renamed": rename_performed,
+        "message": "agent saved",
+    })
+
+
 def handle_save_room(handler):
     body, err = _read_json_body(handler)
     if err:
@@ -1121,6 +1234,25 @@ def handle_room_action(handler, path):
         emit_event(shared, room_id, EVT_ROOM_STARTED)
         _schedule_room(cfg, room_id)
         _send_json(handler, {"ok": True, "room_id": room_id, "state": state})
+        return
+
+    if action == "resume":
+        # Explicit error → running recovery path. Also accepts paused → running.
+        cur_status = (room.get("status") or read_room_state(shared, room_id, room).get("status") or "paused")
+        if cur_status not in ("error", "paused"):
+            _send_json(handler, {"ok": False, "error": f"cannot resume from status: {cur_status}"})
+            return
+        if not room.get("agents"):
+            _send_json(handler, {"ok": False, "error": "room has no agents"})
+            return
+        # Clear last_error, reset turn to idle if it was failed
+        state = set_room_status(shared, room, "running")
+        cfg["rooms"][room_id]["status"] = "running"
+        write_bridge(config_path, cfg)
+        append_room_log_safely(shared, room_id, "room_resumed", f"聊天室从 {cur_status} 恢复运行")
+        emit_event(shared, room_id, EVT_ROOM_STARTED, meta={"recovered_from": cur_status})
+        _schedule_room(cfg, room_id)
+        _send_json(handler, {"ok": True, "room_id": room_id, "state": state, "recovered_from": cur_status})
         return
 
     if action == "pause":

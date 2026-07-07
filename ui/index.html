@@ -6,19 +6,19 @@
 <title>Agent Bridge · 控制中心</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <script>
+/* 防止主题切换 FOUC — 首屏前同步应用 */
 (function() {
   try {
-    const saved = localStorage.getItem('agentBridgeTheme');
+    var saved = localStorage.getItem('agentBridgeTheme');
     if (saved === 'light' || saved === 'dark') {
       document.documentElement.dataset.theme = saved;
       return;
     }
-    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      document.documentElement.dataset.theme = 'dark';
-      return;
-    }
+    var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  } catch (e) {
     document.documentElement.dataset.theme = 'light';
-  } catch (e) {}
+  }
 })();
 </script>
 <link rel="stylesheet" href="style.css">
@@ -28,28 +28,28 @@
 <div class="app-shell">
 
   <!-- ═══ Sidebar ═══ -->
-  <aside class="sidebar" id="sidebar">
+  <aside class="sidebar">
     <div class="sidebar-brand">
-      <div class="brand-main">
-        <img class="brand-logo logo-light" src="/icon/light.png" alt="" aria-hidden="true">
-        <img class="brand-logo logo-dark" src="/icon/dark.png" alt="" aria-hidden="true">
-        <span class="logo">agent-bridge</span>
+      <img class="brand-logo logo-light" src="/icon/light.png" alt="" aria-hidden="true">
+      <img class="brand-logo logo-dark"  src="/icon/dark.png"  alt="" aria-hidden="true">
+      <div>
+        <div class="logo">agent-bridge</div>
+        <div class="sidebar-sub">控制中心</div>
       </div>
-      <span class="sidebar-sub">控制中心</span>
     </div>
 
     <nav class="sidebar-nav" aria-label="主导航">
-      <button class="tab-btn active" data-tab="chat">
+      <button class="tab-btn active" data-tab="chat" data-action="switchTab" data-tab-name="chat">
         <span class="nav-icon">CH</span>
         <span class="nav-label">聊天</span>
         <span class="nav-hint">Chat</span>
       </button>
-      <button class="tab-btn" data-tab="agent">
+      <button class="tab-btn" data-tab="agent" data-action="switchTab" data-tab-name="agent">
         <span class="nav-icon">AG</span>
         <span class="nav-label">Agent</span>
         <span class="nav-hint">配置</span>
       </button>
-      <button class="tab-btn" data-tab="settings">
+      <button class="tab-btn" data-tab="settings" data-action="switchTab" data-tab-name="settings">
         <span class="nav-icon">ST</span>
         <span class="nav-label">设置</span>
         <span class="nav-hint">Settings</span>
@@ -59,7 +59,7 @@
     <div class="sidebar-spacer"></div>
 
     <div class="sidebar-status">
-      <div class="sidebar-stat" id="statBlock">
+      <div class="sidebar-stat">
         <span class="sidebar-stat-label">消息</span>
         <span class="sidebar-stat-value" id="statCount">—</span>
         <span class="sidebar-stat-sub" id="statLast"></span>
@@ -67,11 +67,11 @@
       <div class="poll-block">
         <span class="poll-dot" id="pollDot"></span>
         <span id="pollLabel">轮询</span>
-        <button class="poll-toggle" id="pollBtn" title="切换轮询">∥</button>
+        <button class="poll-toggle" id="pollBtn" data-action="togglePoll" title="切换轮询">∥</button>
       </div>
     </div>
 
-    <button class="theme-toggle" id="themeToggle" type="button" title="切换明暗色模式" aria-label="切换明暗色模式">☀</button>
+    <button class="theme-toggle" data-action="toggleTheme" type="button" title="切换明暗色模式" aria-label="切换明暗色模式">☀</button>
   </aside>
 
   <!-- ═══ Main Area ═══ -->
@@ -80,176 +80,29 @@
 
     <main class="main-content">
 
-      <!-- Chat pane -->
+      <!-- Chat pane (三视图统一动态渲染) -->
       <section class="tab-pane active" id="pane-chat" aria-label="聊天">
-
-        <!-- Room grid view (default) -->
-        <article id="roomGridView" class="room-grid-view">
-          <header class="room-grid-header">
-            <div class="page-title-row">
-              <img class="page-logo logo-light" src="/icon/light.png" alt="" aria-hidden="true">
-              <img class="page-logo logo-dark" src="/icon/dark.png" alt="" aria-hidden="true">
-              <h2 class="room-grid-title">聊天室</h2>
-            </div>
-          </header>
-          <div id="roomGrid" class="room-grid">
-            <div class="empty-state"><div class="icon">💬</div><h3>加载中…</h3></div>
-          </div>
-        </article>
-
-        <!-- Room conversation view (hidden by default) -->
-        <article id="roomConvView" class="room-conv-view" style="display:none">
-          <header class="conv-header">
-            <button class="back-btn" id="backToRooms">← 聊天室</button>
-            <span id="convRoomName" class="conv-room-name"></span>
-            <div id="convAgentBadges" class="conv-agent-badges"></div>
-            <div id="roomRunControls" class="conv-agent-badges"></div>
-          </header>
-          <div class="room-conv-body">
-            <div class="chat-area room-conv-main">
-              <div class="compose-bar">
-                <select id="composeAgent" aria-label="选择发送 Agent"></select>
-                <input type="text" id="composeInput" placeholder="输入消息，按 Enter 发送…" aria-label="消息输入" />
-                <button class="compose-btn" id="composeBtn">发送</button>
-              </div>
-              <div class="chat-controls">
-                <input class="chat-search" id="searchInput" type="text" placeholder="搜索消息…" aria-label="搜索消息" />
-                <button class="tool-btn" id="refreshBtn" title="刷新">⟳</button>
-              </div>
-              <div id="chatArea"></div>
-            </div>
-            <aside class="room-log-panel" aria-label="&#36816;&#34892;&#26085;&#24535;">
-              <div class="room-log-header">
-                <h3 class="room-log-title">&#36816;&#34892;&#26085;&#24535;</h3>
-                <div style="display:flex;align-items:center;gap:6px">
-                  <span class="room-log-count" id="roomLogCount">0 &#26465;</span>
-                  <button class="room-log-copy-btn" id="copyRoomLogsBtn" title="复制运行日志" onclick="copyRoomLogs()">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 011.5-1.5H11"/></svg>
-                  </button>
-                </div>
-              </div>
-              <div id="roomTurnStatus" class="room-turn-status"></div>
-              <div id="roomLogArea" class="room-log-list"></div>
-            </aside>
-          </div>
-        </article>
-
+        <div id="chatView"></div>
       </section>
 
       <!-- Agent pane -->
       <section class="tab-pane" id="pane-agent" aria-label="Agent 配置">
-        <div class="agent-area" id="agentArea">
-          <div class="empty-state">加载中…</div>
-        </div>
+        <div id="agentView"></div>
       </section>
 
       <!-- Settings pane -->
       <section class="tab-pane" id="pane-settings" aria-label="设置">
-        <div class="settings-area" id="settingsArea">
-          <div class="settings-page">
-            <div class="settings-page-head">
-              <div>
-                <div class="settings-page-title">设置</div>
-                <div class="settings-page-subtitle">配置 Agent Bridge 运行参数</div>
-              </div>
-              <button class="settings-save-btn" id="settingsSaveBtn" onclick="saveSettings()">保存设置</button>
-            </div>
-
-            <!-- 基础设置 -->
-            <div class="settings-block">
-              <div class="settings-block-header">
-                <span class="settings-block-title">基础设置</span>
-                <span class="settings-block-meta">只读</span>
-              </div>
-              <div class="settings-row">
-                <div class="settings-row-left">
-                  <span class="settings-label">端口</span>
-                  <span class="settings-desc">当前服务监听端口</span>
-                </div>
-                <span class="settings-value readonly" id="settingsPort">—</span>
-              </div>
-              <div class="settings-row">
-                <div class="settings-row-left">
-                  <span class="settings-label">数据目录</span>
-                  <span class="settings-desc">共享消息目录路径</span>
-                </div>
-                <button class="settings-path-btn" id="settingsSharedDir" onclick="openSettingsDir()" title="在文件管理器中打开">—</button>
-              </div>
-            </div>
-
-            <!-- 轮询设置 -->
-            <div class="settings-block">
-              <div class="settings-block-header">
-                <span class="settings-block-title">轮询设置</span>
-              </div>
-              <div class="settings-row">
-                <div class="settings-row-left">
-                  <span class="settings-label">轮询间隔</span>
-                  <span class="settings-desc">自动轮询的时间间隔（5-3600 秒）</span>
-                </div>
-                <div class="settings-input-group">
-                  <input type="number" class="settings-input" id="settingsPollInterval" min="5" max="3600" value="180" aria-label="轮询间隔">
-                  <span class="settings-unit">秒</span>
-                </div>
-              </div>
-              <div class="settings-row">
-                <div class="settings-row-left">
-                  <span class="settings-label">自动启动轮询</span>
-                  <span class="settings-desc">启动服务时自动开始轮询</span>
-                </div>
-                <label class="settings-toggle">
-                  <input type="checkbox" id="settingsAutoPoll" checked>
-                  <span class="settings-toggle-track"></span>
-                </label>
-              </div>
-            </div>
-
-            <!-- 日志设置 -->
-            <div class="settings-block">
-              <div class="settings-block-header">
-                <span class="settings-block-title">日志设置</span>
-              </div>
-              <div class="settings-row">
-                <div class="settings-row-left">
-                  <span class="settings-label">运行日志保留条数</span>
-                  <span class="settings-desc">聊天室运行日志最大保留数量（10-100000）</span>
-                </div>
-                <div class="settings-input-group">
-                  <input type="number" class="settings-input" id="settingsMaxLogs" min="10" max="100000" value="1000" aria-label="日志保留条数">
-                  <span class="settings-unit">条</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- 关于 -->
-            <div class="settings-block">
-              <div class="settings-block-header">
-                <span class="settings-block-title">关于</span>
-              </div>
-              <div class="settings-row">
-                <div class="settings-row-left">
-                  <span class="settings-label">版本号</span>
-                </div>
-                <span class="settings-value" id="settingsVersion">—</span>
-              </div>
-              <div class="settings-row">
-                <div class="settings-row-left">
-                  <span class="settings-label">项目链接</span>
-                </div>
-                <a class="settings-link" id="settingsProjectUrl" href="#" target="_blank" rel="noopener">—</a>
-              </div>
-            </div>
-
-            <!-- 保存状态 -->
-            <div class="settings-status" id="settingsStatus"></div>
-          </div>
-        </div>
+        <div id="settingsView"></div>
       </section>
 
     </main>
   </div>
 
 </div>
+
+<!-- Modal & Toast 容器（由 JS 动态填充） -->
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-root"></div>
 
 <script src="app.js"></script>
 </body>

@@ -105,6 +105,10 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             handler()
         elif parsed.path.startswith("/api/rooms/"):
             routes.handle_room_action(self, parsed.path)
+        elif parsed.path.startswith("/api/agents/") and parsed.path.count("/") >= 3:
+            # PUT /api/agents/{agent_id} — single agent update
+            agent_id = parsed.path.rstrip("/").split("/")[-1]
+            routes.handle_update_single_agent(self, agent_id)
         else:
             self.send_error(404)
 

@@ -5,6 +5,16 @@
 ## [Unreleased]
 
 ### Added
+- 新增 `PUT /api/agents/{agent_id}` 单 Agent 更新端点，替代"改一个 Agent 要全量 POST"的反模式
+- 新增 `POST /api/rooms/{room_id}/resume` 端点，明确支持 error/paused → running 的恢复路径
+- WebUI 引入 hash 路由（`#/chat`, `#/chat/<room_id>`, `#/agents`, `#/settings`），刷新不丢视图、支持浏览器后退
+- WebUI 消息渲染改为 diff 增量更新，消除每 5 秒整体淡入闪烁
+- WebUI 按当前路由精准轮询（设置页不打任何轮询、会话视图才打消息/日志/turn）
+- WebUI 统一 Modal/Toast/Confirm 组件，全部支持 Esc/点遮罩关闭
+- WebUI 事件委托模型（document 单点监听 + data-action 分发），替代 inline onclick + 全局函数
+- WebUI 发送消息支持乐观本地插入
+- WebUI 删除 Agent 时引导处理（检测到运行中房间会提示前往聊天室，而非硬阻塞）
+- WebUI 配置 banner 显示全部 issues，不再截断
 - 创建 pyproject.toml，支持标准 Python 打包（pip install -e .）
 - 创建 CHANGELOG.md 变更日志
 - 新增 runtime.py 单元测试（39 个测试用例）
@@ -15,14 +25,30 @@
 - 拆分 index.html 为 style.css + app.js + index.html（主 HTML 从 5323 行精简到 163 行）
 
 ### Changed
+- **WebUI 全量重写**：index.html / style.css / app.js 三件套从零重写（5530 行 → 2841 行，减 49%）
+- CSS 删除双套主题叠加的技术债（原 2713 行含 1600 行死代码），统一到夜林/苔绿 token 体系
+- 视觉重做：基于 STYLE_GUIDE 色系重新设计视觉语言，圆角统一（8/6/4）、阴影极简（单层）、动效统一（150ms cubic-bezier）
+- 暗色模式：修复 STYLE_GUIDE.md 的 `:root.light` 选择器 bug，独立配色（非亮度翻转）
+- 房间状态视觉强化：running/waiting/paused/error 四态用明确色 + 点状指示
+- 对比度修复：text3 从 4.0:1 提升到 4.6:1（亮色）/ 4.7:1（暗色），符合 WCAG AA
 - 统一 V1/V2 调度路径，移除 V1 fallback，runtime.py 成为唯一调度路径
 - 拆分 server.py（2000 行）为 config.py / discovery.py / poll_manager.py / routes.py / server.py（入口 180 行）
 - 更新 protocol/SPEC.md 为完整的 V2 协议文档（826 行）
 - rooms.py 的 tick_room() / tick_running_rooms() 标记为 @deprecated
 
 ### Fixed
+- 修复主题切换按钮图标逻辑绕的问题（重写为简单的 dark/light 互切）
+- 修复测试 Agent 模态不支持 Esc 关闭（统一组件后天然支持）
+- 修复轮询指示点动画在第二套主题里被关闭的问题
+- 修复嵌套 em 字号难以预测的问题（统一为 px 字号 token）
 - install.sh BRANCH 从 main 改为 dev，与 install.ps1 保持一致
 - 清理 test_runtime.py 中未使用的导入
+
+### Removed
+- 删除 CSS 双套主题叠加（玫红命令中心风 + 苔绿极简风并存的技术债）
+- 删除 inline onclick 全局函数事件模型
+- 删除两套并行的 Agent 编辑入口（badge popup vs card 表单），统一为卡片表单
+- 删除硬编码的 settings HTML（改为 JS 根据 API 动态生成）
 
 ## 2026-05-25 — Adapter V2 UI 与联调优化
 
