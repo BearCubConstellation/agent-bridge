@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import os
 import sys
 import tempfile
@@ -9,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
 
 from channel_hub import ChannelHub
 from rooms import read_room_messages
+from websockets.sync.client import connect
 
 
 class ChannelHubTests(unittest.TestCase):
@@ -63,6 +65,16 @@ class ChannelHubTests(unittest.TestCase):
         os.environ.pop("AGENT_BRIDGE_MISSING_TEST_TOKEN", None)
         with self.assertRaisesRegex(ValueError, "resolution"):
             self.hub._authenticate_registration({"agent_id": "susu", "token": ""})
+
+    def test_websocket_registers_and_replays_pending_message(self):
+        self.hub.publish("susu", {"id": "socket-message", "room_id": "room", "to": "momo", "text": "queued"})
+        self.assertTrue(self.hub.start(host="127.0.0.1", port=0))
+        with connect("ws://127.0.0.1:{}".format(self.hub.status()["port"]), open_timeout=3) as socket:
+            socket.send(json.dumps({"type": "register", "agent_id": "momo"}))
+            self.assertEqual("registered", json.loads(socket.recv(timeout=3))["type"])
+            delivery = json.loads(socket.recv(timeout=3))
+            self.assertEqual("socket-message", delivery["message"]["id"])
+            socket.send(json.dumps({"type": "ack", "message_id": "socket-message"}))
 
 
 if __name__ == "__main__":
