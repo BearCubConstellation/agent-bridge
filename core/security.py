@@ -1,147 +1,147 @@
 #!/usr/bin/env python3
-"""Security utilities for Agent Bridge v2.
+"""Security utilities for Agent Bridge V2."""
+from __future__ import annotations
 
-Provides token validation, ID sanitization, and callback authentication.
-"""
+import hmac
 import os
 import re
-import hashlib
-import hmac
 import sys
 from pathlib import Path
 
-# ── Local import compat ─────────────────────────────────
 _parent = str(Path(__file__).resolve().parent)
 if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
-from protocol import VALID_ID_RE                              # noqa: E402
+from protocol import VALID_ID_RE
 
-
-# ── ID Validation ───────────────────────────────────────
 
 def validate_room_id(room_id):
-    """Return True if room_id matches safe pattern."""
     return bool(room_id and VALID_ID_RE.match(str(room_id)))
 
 
 def validate_agent_id(agent_id):
-    """Return True if agent_id matches safe pattern."""
     return bool(agent_id and VALID_ID_RE.match(str(agent_id)))
 
 
-# ── Token / Callback Auth ───────────────────────────────
+def is_loopback_host(host):
+    value = str(host or "").strip().lower().strip("[]")
+    return value in {"127.0.0.1", "::1", "localhost"}
+
 
 def resolve_token(token_value):
-    """Resolve a token value that may be:
-    - A plain string
-    - An env var reference: ${ENV_VAR}
-    - A file path to read token from
-    """
+    """Resolve a plain token, ``${ENV_VAR}``, or token-file reference."""
     if not token_value:
         return None
-
-    s = str(token_value).strip()
-
-    # Env var reference: ${VAR_NAME}
-    env_match = re.match(r'^\$\{(\w+)\}$', s)
+    value = str(token_value).strip()
+    env_match = re.match(r"^\$\{(\w+)\}$", value)
     if env_match:
         return os.environ.get(env_match.group(1))
-
-    # Tilde-expand and check if it's a file path
-    expanded = os.path.expanduser(os.path.expandvars(s))
+    expanded = os.path.expanduser(os.path.expandvars(value))
     if os.path.isfile(expanded):
         try:
-            with open(expanded, 'r') as f:
-                return f.read().strip()
-        except (OSError, IOError):
+            with open(expanded, "r", encoding="utf-8") as handle:
+                return handle.read().strip()
+        except OSError:
             return None
+    return value
 
-    return s
+
+def _configured_token(security, key, agent_id=""):
+    if key == "callback":
+        tokens = security.get("callback_tokens") or {}
+        return tokens.get(agent_id) or security.get("callback_token")
+    return security.get("mcp_token")
 
 
-def verify_callback_token(config, agent_id, provided_token):
-    """Verify a callback token for a specific agent.
-
-    Token lookup order:
-    1. config['security']['callback_tokens'][agent_id]
-    2. config['security']['callback_token'] (global fallback)
-    3. No security configured → allow (local-only mode)
-
-    Returns (ok: bool, error: str)
-    """
-    security = config.get("security") or {}
-    tokens = security.get("callback_tokens") or {}
-
-    if not tokens and not security.get("callback_token"):
-        # No security configured — local mode, allow all
-        return True, ""
-
-    expected = tokens.get(agent_id) or security.get("callback_token")
-    if not expected:
-        return False, f"no token configured for agent: {agent_id}"
-
+def _verify(expected, provided, missing_message="missing token"):
     resolved = resolve_token(expected)
     if not resolved:
         return False, "token resolution failed"
-
-    if not provided_token:
-        return False, "missing token"
-
-    # Constant-time comparison
-    if not hmac.compare_digest(resolved, provided_token):
+    if not provided:
+        return False, missing_message
+    if not hmac.compare_digest(str(resolved), str(provided)):
         return False, "invalid token"
-
     return True, ""
 
 
+def verify_callback_token(config, agent_id, provided_token, allow_unauthenticated=True):
+    """Verify a callback token.
+
+    Unauthenticated callbacks remain available only when the caller explicitly
+    identifies the request as local-only.  The HTTP server passes ``False`` for
+    non-loopback binds and refuses to start without configured credentials.
+    """
+    security = (config or {}).get("security") or {}
+    expected = _configured_token(security, "callback", agent_id)
+    if not expected:
+        if allow_unauthenticated:
+            return True, ""
+        return False, "callback token is required for non-local bind"
+    return _verify(expected, provided_token)
+
+
+def verify_mcp_token(config, provided_token, allow_unauthenticated=False):
+    """Verify the token protecting HTTP MCP endpoints."""
+    security = (config or {}).get("security") or {}
+    expected = _configured_token(security, "mcp")
+    if not expected:
+        if allow_unauthenticated:
+            return True, ""
+        return False, "mcp token is required for non-local bind"
+    return _verify(expected, provided_token)
+
+
+def validate_network_exposure(config, host):
+    """Return a startup error when a public bind has no required tokens."""
+    if is_loopback_host(host):
+        return ""
+    security = (config or {}).get("security") or {}
+    callbacks = security.get("callback_token") or security.get("callback_tokens")
+    mcp_token = security.get("mcp_token")
+    missing = []
+    if not callbacks:
+        missing.append("security.callback_token or security.callback_tokens")
+    if not mcp_token:
+        missing.append("security.mcp_token")
+    if missing:
+        return "non-loopback bind requires " + " and ".join(missing)
+    return ""
+
+
 def extract_bearer_token(headers):
-    """Extract Bearer token from HTTP headers dict."""
-    auth = headers.get("Authorization", "") or headers.get("authorization", "")
+    auth = (headers or {}).get("Authorization", "") or (headers or {}).get("authorization", "")
     if auth.startswith("Bearer "):
         return auth[7:].strip()
     return ""
 
 
-def extract_token_from_request(headers, params):
-    """Extract token from Authorization header or query param.
+def extract_token_from_request(headers, params=None, allow_query=False):
+    """Extract an Authorization bearer token.
 
-    Priority: Authorization header > ?token= query param
+    Query-string credentials are intentionally disabled by default because they
+    leak into logs, browser history and proxy telemetry.
     """
     bearer = extract_bearer_token(headers)
     if bearer:
         return bearer
-    return params.get("token", "")
+    if allow_query:
+        return (params or {}).get("token", "")
+    return ""
 
-
-# ── Agent-Room Membership ───────────────────────────────
 
 def agent_in_room(config, room_id, agent_id):
-    """Check if agent_id is a member of the specified room.
-
-    Checks both ``room["agents"]`` (explicit membership list) and
-    ``room["order"]`` (turn-ordering list, which also implies membership).
-    """
-    rooms = config.get("rooms") or {}
-    room = rooms.get(room_id)
+    room = ((config or {}).get("rooms") or {}).get(room_id)
     if not room:
         return False
-    agents = room.get("agents") or []
-    order = room.get("order") or []
-    return agent_id in agents or agent_id in order
+    return agent_id in (room.get("agents") or []) or agent_id in (room.get("order") or [])
 
-
-# ── Input Sanitization ──────────────────────────────────
 
 def sanitize_message(text, max_length=50000):
-    """Sanitize message text. Returns cleaned string or raises ValueError."""
     if not text or not isinstance(text, str):
         raise ValueError("message must be a non-empty string")
-    text = text.strip()
+    text = text.strip().replace("\x00", "")
     if not text:
         raise ValueError("message must be a non-empty string")
     if len(text) > max_length:
-        raise ValueError(f"message exceeds max length ({max_length})")
-    # Strip null bytes
-    text = text.replace('\x00', '')
+        raise ValueError("message exceeds max length ({})".format(max_length))
     return text
