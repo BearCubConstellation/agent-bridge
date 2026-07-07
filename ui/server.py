@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Agent Bridge local UI, legacy runtime and channel hub server."""
+"""Agent Bridge local UI and room-runtime server."""
 from __future__ import annotations
 
 import argparse
@@ -10,14 +10,8 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
-from channel_hub import ChannelHub
 from scheduler import get_scheduler
-from security import (
-    extract_token_from_request,
-    is_loopback_host,
-    validate_network_exposure,
-    verify_mcp_token,
-)
+from security import extract_token_from_request, is_loopback_host, validate_network_exposure, verify_mcp_token
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import BRIDGE_FILENAME, DEFAULT_POLL_INTERVAL, find_shared_dir, read_bridge, write_bridge
@@ -28,7 +22,6 @@ import routes
 class BridgeHandler(http.server.SimpleHTTPRequestHandler):
     shared_dir = None
     poll_manager = None
-    channel_hub = None
     bind_host = "127.0.0.1"
 
     def send_error(self, code, message=None, explain=None):
@@ -55,10 +48,6 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         if path.startswith("/api/mcp") and not self._mcp_authorized(parsed):
-            return
-        if path == "/api/channel/status":
-            hub = self.channel_hub
-            routes._send_json(self, hub.status() if hub else {"enabled": False, "running": False})
             return
         route_map = {
             "/": lambda: routes.serve_static(self, "index.html"),
@@ -138,12 +127,10 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Agent Bridge — UI + channel hub")
+    parser = argparse.ArgumentParser(description="Agent Bridge — UI and Room Runtime")
     parser.add_argument("--dir", "-d", help="Shared chat directory (auto-detect)")
     parser.add_argument("--port", "-p", type=int, default=8825, help="UI/API port (default: 8825)")
     parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
-    parser.add_argument("--channel-port", type=int, help="Channel WebSocket port (default: 8826)")
-    parser.add_argument("--no-channel", action="store_true", help="Disable the WebSocket channel hub")
     parser.add_argument("--open", "-o", action="store_true", help="Open browser")
     parser.add_argument("--poll-interval", type=int, default=DEFAULT_POLL_INTERVAL)
     parser.add_argument("--no-poll", action="store_true", help="Disable automatic polling")
@@ -166,13 +153,6 @@ def main():
     server_cfg = dict(config.get("server") or {})
     server_cfg.update({"host": args.host, "port": args.port})
     config["server"] = server_cfg
-    channel_cfg = dict(config.get("channel") or {})
-    channel_cfg.setdefault("enabled", True)
-    channel_cfg.setdefault("host", args.host)
-    channel_cfg.setdefault("port", 8826)
-    if args.channel_port:
-        channel_cfg["port"] = args.channel_port
-    config["channel"] = channel_cfg
     write_bridge(config_path, config)
 
     settings = routes._read_settings(shared_dir)
@@ -188,21 +168,9 @@ def main():
         scheduler.start()
         scheduler.scan_running_rooms(config)
 
-    channel_hub = None
-    if channel_cfg.get("enabled", True) and not args.no_channel:
-        channel_hub = ChannelHub(shared_dir, lambda: read_bridge(Path(shared_dir))[0])
-        if not channel_hub.start(channel_cfg.get("host"), channel_cfg.get("port")):
-            poll_manager.stop()
-            if bridge_existed:
-                scheduler.stop()
-            parser.error("cannot start channel hub: {}".format(channel_hub.status().get("error")))
-        BridgeHandler.channel_hub = channel_hub
-
     try:
         server = http.server.ThreadingHTTPServer((args.host, args.port), BridgeHandler)
     except OSError as error:
-        if channel_hub:
-            channel_hub.stop()
         if bridge_existed:
             scheduler.stop()
         poll_manager.stop()
@@ -210,12 +178,10 @@ def main():
 
     url = "http://{}:{}".format(args.host, args.port)
     print("=" * 44)
-    print("Agent Bridge - UI + Channel Hub")
+    print("Agent Bridge - UI + Room Runtime")
     print("Shared dir: {}".format(shared_dir))
     print("URL:        {}".format(url))
     print("MCP HTTP:   {}/api/mcp".format(url))
-    if channel_hub:
-        print("Channel WS: ws://{}:{}".format(channel_cfg.get("host"), channel_cfg.get("port")))
     print("Ctrl+C to stop")
     print("=" * 44)
 
@@ -227,8 +193,6 @@ def main():
     except KeyboardInterrupt:
         print("\nStopping...")
     finally:
-        if channel_hub:
-            channel_hub.stop()
         scheduler.stop()
         poll_manager.stop()
         server.server_close()
