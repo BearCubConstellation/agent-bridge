@@ -95,18 +95,19 @@ def mutate_room_state(
     room_cfg=None,
     mutator: Optional[Mutator] = None,
 ) -> Tuple[dict, Any]:
-    """Atomically mutate a room state and return ``(state, mutator_result)``.
+    """Atomically mutate room state and return ``(state, mutator_result)``.
 
-    ``mutator`` receives the live state dictionary.  Returning ``False`` skips
-    persistence, which is useful for read-only decisions.  No callbacks or
-    adapter/network calls should be made inside the mutator.
+    A mutator may return ``False`` or ``{"persist": False}`` to reject an
+    update without changing the file.  No callbacks or adapter/network calls
+    should be made inside the mutator.
     """
     rdir = room_dir(shared_dir, room_id)
     rdir.mkdir(parents=True, exist_ok=True)
     with file_lock(rdir / ".state.lock"):
         state = _load_unlocked(shared_dir, room_id, room_cfg)
         result = mutator(state) if mutator else None
-        if result is not False:
+        persist = result is not False and not (isinstance(result, dict) and result.get("persist") is False)
+        if persist:
             state["revision"] = int(state.get("revision", 0)) + 1
             _atomic_write_unlocked(_state_path(shared_dir, room_id), state)
         return copy.deepcopy(state), result
