@@ -1,15 +1,7 @@
 #!/usr/bin/env python3
-"""
-Agent Bridge — 本地 UI 服务（精简入口）
+"""Agent Bridge local UI and HTTP API server."""
+from __future__ import annotations
 
-集成了轮询 + 配置管理 + 聊天时间线。
-只需要跑这一个进程。
-
-用法:
-    python3 server.py                          # 默认 8825 端口
-    python3 server.py --open                   # 自动打开浏览器
-    python3 server.py --poll-interval 60       # 每 60 秒轮询一次
-"""
 import argparse
 import http.server
 import sys
@@ -17,33 +9,27 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
-# 从 core/ 导入
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "core"))
 from scheduler import get_scheduler
-
-# 从同目录子模块导入
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import (
-    BRIDGE_FILENAME,
-    DEFAULT_POLL_INTERVAL,
-    find_shared_dir,
-    read_bridge,
-    write_bridge,
+from security import (
+    extract_token_from_request,
+    is_loopback_host,
+    validate_network_exposure,
+    verify_mcp_token,
 )
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from config import BRIDGE_FILENAME, DEFAULT_POLL_INTERVAL, find_shared_dir, read_bridge, write_bridge
 from poll_manager import PollManager
 import routes
 
 
-# ─── HTTP Handler ─────────────────────────────────────
-
 class BridgeHandler(http.server.SimpleHTTPRequestHandler):
-
     shared_dir = None
     poll_manager = None
-    mcp_manager = None
+    bind_host = "127.0.0.1"
 
     def send_error(self, code, message=None, explain=None):
-        """覆写基类，为错误响应也添加安全头。"""
         self.send_response(code)
         self.send_header("Content-Security-Policy", routes.CSP_HEADER)
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -52,10 +38,22 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         if body:
             self.wfile.write(body.encode("utf-8"))
 
+    def _mcp_authorized(self, parsed):
+        shared = Path(self.shared_dir)
+        config, _ = read_bridge(shared)
+        params = dict(urllib.parse.parse_qsl(parsed.query))
+        token = extract_token_from_request(dict(self.headers), params)
+        ok, error = verify_mcp_token(config, token, allow_unauthenticated=is_loopback_host(self.bind_host))
+        if ok:
+            return True
+        routes._send_json(self, {"ok": False, "error": "mcp auth failed: {}".format(error)}, status=403)
+        return False
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
-
+        if path.startswith("/api/mcp") and not self._mcp_authorized(parsed):
+            return
         route_map = {
             "/": lambda: routes.serve_static(self, "index.html"),
             "/api/config": lambda: routes.handle_get_config(self),
@@ -86,6 +84,8 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith("/api/mcp") and not self._mcp_authorized(parsed):
+            return
         route_map = {
             "/api/config": lambda: routes.handle_update_config(self),
             "/api/config/full": lambda: routes.handle_update_config_full(self),
@@ -110,139 +110,97 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
         elif parsed.path.startswith("/api/rooms/"):
             routes.handle_room_action(self, parsed.path)
         elif parsed.path.startswith("/api/agents/") and parsed.path.count("/") >= 3:
-            # PUT /api/agents/{agent_id} — single agent update
-            agent_id = parsed.path.rstrip("/").split("/")[-1]
-            routes.handle_update_single_agent(self, agent_id)
+            routes.handle_update_single_agent(self, parsed.path.rstrip("/").split("/")[-1])
         elif parsed.path.startswith("/api/mcp/tools/call/"):
-            # POST /api/mcp/tools/call/{tool_name} — REST 风格快捷调用
-            tool_name = parsed.path.rstrip("/").split("/")[-1]
-            routes.handle_mcp_tools_call(self, tool_name)
+            routes.handle_mcp_tools_call(self, parsed.path.rstrip("/").split("/")[-1])
         else:
             self.send_error(404)
 
     do_PUT = do_POST
 
-    # ─── Helpers (delegated to routes) ──────────────
-
     def _read_json_body(self):
-        """Read and parse JSON body with size limit."""
         return routes._read_json_body(self)
 
     def send_json(self, data, status=200):
-        """Send a JSON response."""
         routes._send_json(self, data, status=status)
 
     def log_message(self, fmt, *args):
-        msg = fmt % args
-        _suppress_patterns = ["/api/messages", "/api/poll", "/api/status"]
-        if any(p in msg for p in _suppress_patterns):
+        message = fmt % args
+        if any(pattern in message for pattern in ("/api/messages", "/api/poll", "/api/status")):
             return
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+        print("[{}] {}".format(datetime.now().strftime("%H:%M:%S"), message))
 
-
-# ─── 启动 ─────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Agent Bridge — UI + polling server")
     parser.add_argument("--dir", "-d", help="Shared chat directory (auto-detect)")
     parser.add_argument("--port", "-p", type=int, default=8825, help="Port (default: 8825)")
-    parser.add_argument("--host", default="127.0.0.1", help="Bind (default: 127.0.0.1)")
+    parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
     parser.add_argument("--open", "-o", action="store_true", help="Open browser")
-    parser.add_argument("--poll-interval", type=int, default=DEFAULT_POLL_INTERVAL,
-                        help=f"Poll interval in seconds (default: {DEFAULT_POLL_INTERVAL})")
-    parser.add_argument("--no-poll", action="store_true",
-                        help="Disable automatic polling (manual poll via API only)")
-
+    parser.add_argument("--poll-interval", type=int, default=DEFAULT_POLL_INTERVAL)
+    parser.add_argument("--no-poll", action="store_true", help="Disable automatic polling")
     args = parser.parse_args()
+
     shared_dir = args.dir or str(find_shared_dir())
-    BridgeHandler.shared_dir = shared_dir
-
     Path(shared_dir).mkdir(parents=True, exist_ok=True)
+    BridgeHandler.shared_dir = shared_dir
+    BridgeHandler.bind_host = args.host
 
-    # 读取 bridge.yaml（记录是否已存在）
-    bridge_yaml_path = Path(shared_dir) / BRIDGE_FILENAME
-    bridge_existed = bridge_yaml_path.exists()
-    cfg, cfg_path = read_bridge(Path(shared_dir))
-    if not cfg_path.exists():
-        write_bridge(cfg_path, cfg)
+    bridge_path = Path(shared_dir) / BRIDGE_FILENAME
+    bridge_existed = bridge_path.exists()
+    config, config_path = read_bridge(Path(shared_dir))
+    if not config_path.exists():
+        write_bridge(config_path, config)
+    exposure_error = validate_network_exposure(config, args.host)
+    if exposure_error:
+        parser.error(exposure_error)
 
-    # 初始化后台轮询（优先使用 bridge.yaml 中保存的 settings）
-    from routes import _read_settings
-    saved_settings = _read_settings(shared_dir)
-    poll_interval = args.poll_interval or saved_settings.get("poll_interval", DEFAULT_POLL_INTERVAL)
-    auto_start_poll = saved_settings.get("auto_start_poll", True)
-    poll_mgr = PollManager(shared_dir, poll_interval)
-    BridgeHandler.poll_manager = poll_mgr
-    if not args.no_poll and auto_start_poll:
-        poll_mgr.start()
+    # Make callback URLs match the process that is actually listening.
+    server_cfg = dict(config.get("server") or {})
+    server_cfg.update({"host": args.host, "port": args.port})
+    config["server"] = server_cfg
+    write_bridge(config_path, config)
 
-    # 初始化 V2 Scheduler（仅在 bridge.yaml 已存在时启动）
-    sched = get_scheduler()
+    settings = routes._read_settings(shared_dir)
+    poll_interval = args.poll_interval or settings.get("poll_interval", DEFAULT_POLL_INTERVAL)
+    poll_manager = PollManager(shared_dir, poll_interval)
+    BridgeHandler.poll_manager = poll_manager
+    if not args.no_poll and settings.get("auto_start_poll", True):
+        poll_manager.start()
+
+    scheduler = get_scheduler()
+    scheduler.set_config(config)
     if bridge_existed:
-        cfg, cfg_path = read_bridge(Path(shared_dir))
-        sched.set_config(cfg)
-        sched.start()
-        sched.scan_running_rooms(cfg)
-    else:
-        print("[main] bridge.yaml not found, Scheduler not auto-started. "
-              "Will be started on first PollManager cycle.")
-
-    # 启动 stdio MCP server 子进程（让原生 MCP client 能接入）
-    # 受 bridge.yaml 的 mcp.enabled 控制（默认 True）
-    cfg_fresh, _ = read_bridge(Path(shared_dir))
-    mcp_cfg = cfg_fresh.get("mcp", {}) or {}
-    mcp_enabled = mcp_cfg.get("enabled", True)
-    mcp_mgr = None
-    try:
-        from mcp_manager import MCPManager
-        src_dir = str(Path(__file__).resolve().parent.parent / "core")
-        mcp_mgr = MCPManager(shared_dir, src_dir=src_dir, log_dir=shared_dir)
-        BridgeHandler.mcp_manager = mcp_mgr
-        if mcp_enabled:
-            mcp_mgr.start()
-            import atexit
-            atexit.register(mcp_mgr.stop)
-        else:
-            print("[mcp] stdio MCP server 已在配置中禁用 (mcp.enabled=false)，仅 HTTP 端点可用")
-    except Exception as e:
-        print(f"[mcp] stdio MCP server 启动失败（HTTP MCP 端点仍可用）: {e}")
+        scheduler.start()
+        scheduler.scan_running_rooms(config)
 
     try:
-        server = http.server.HTTPServer((args.host, args.port), BridgeHandler)
-    except OSError as e:
-        print(f"Error: Cannot bind to {args.host}:{args.port} — {e}")
-        print(f"Hint: Port may be in use. Try --port with a different number (e.g. --port {args.port + 1}).")
-        if mcp_mgr:
-            mcp_mgr.stop()
-        sys.exit(1)
+        server = http.server.ThreadingHTTPServer((args.host, args.port), BridgeHandler)
+    except OSError as error:
+        if bridge_existed:
+            scheduler.stop()
+        poll_manager.stop()
+        parser.error("cannot bind {}:{} — {}".format(args.host, args.port, error))
 
-    url = f"http://{args.host}:{args.port}"
-
-    poll_text = f"every {args.poll_interval}s" if not args.no_poll else "disabled"
+    url = "http://{}:{}".format(args.host, args.port)
     print("=" * 44)
     print("Agent Bridge - UI + Poll")
-    print(f"Shared dir: {shared_dir}")
-    print(f"URL:        {url}")
-    print(f"Polling:    {poll_text}")
-    if mcp_mgr and mcp_mgr.is_alive():
-        print(f"MCP:        stdio (pid={mcp_mgr.pid()}) + HTTP {url}/api/mcp")
-    else:
-        print(f"MCP:        HTTP only ({url}/api/mcp)")
+    print("Shared dir: {}".format(shared_dir))
+    print("URL:        {}".format(url))
+    print("MCP HTTP:   {}/api/mcp".format(url))
     print("Ctrl+C to stop")
     print("=" * 44)
 
     if args.open:
         import webbrowser
         webbrowser.open(url)
-
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nStopping...")
-        sched.stop()
-        poll_mgr.stop()
-        if mcp_mgr:
-            mcp_mgr.stop()
+    finally:
+        scheduler.stop()
+        poll_manager.stop()
         server.server_close()
 
 
