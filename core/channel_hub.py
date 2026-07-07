@@ -8,9 +8,9 @@ normal replies. Rooms, persistence and audit logs remain owned by AgentBridge.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
-import os
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional
@@ -36,11 +36,11 @@ class ChannelHub:
         self._config_provider = config_provider
         self._connections: Dict[str, Any] = {}
         self._connections_lock = threading.RLock()
+        self._dedup_lock = threading.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._server = None
         self._ready = threading.Event()
-        self._stopping = threading.Event()
         self._start_error = ""
         self._host = "127.0.0.1"
         self._port = 8826
@@ -76,23 +76,24 @@ class ChannelHub:
             return False
         config = self._config()
         self._host = str(host or config.get("host") or "127.0.0.1")
-        self._port = int(port or config.get("port") or 8826)
+        self._port = int(port if port is not None else config.get("port", 8826))
         self._start_error = self.validate_exposure(self._host)
         if self._start_error:
             return False
         self.root.mkdir(parents=True, exist_ok=True)
         self._ready.clear()
-        self._stopping.clear()
         self._thread = threading.Thread(target=self._run_loop, name="agent-bridge-channel", daemon=True)
         self._thread.start()
         self._ready.wait(timeout)
         return self.is_running
 
     def stop(self, timeout: float = 5.0) -> None:
-        self._stopping.set()
         loop = self._loop
         if loop and loop.is_running():
-            asyncio.run_coroutine_threadsafe(self._shutdown(), loop).result(timeout=timeout)
+            try:
+                asyncio.run_coroutine_threadsafe(self._shutdown(), loop).result(timeout=timeout)
+            except Exception:
+                logger.debug("channel hub shutdown did not complete cleanly", exc_info=True)
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=timeout)
         self._thread = None
@@ -134,6 +135,8 @@ class ChannelHub:
 
     async def _serve(self) -> None:
         self._server = await websockets.serve(self._handle_socket, self._host, self._port, max_size=256 * 1024)
+        if self._server.sockets:
+            self._port = int(self._server.sockets[0].getsockname()[1])
 
     async def _shutdown(self) -> None:
         server, self._server = self._server, None
@@ -174,6 +177,10 @@ class ChannelHub:
             async for raw in websocket:
                 await self._handle_event(agent_id, websocket, self._decode(raw))
         except Exception as exc:
+            try:
+                await websocket.send(json.dumps(error_event("channel_error", str(exc)), ensure_ascii=False))
+            except Exception:
+                pass
             if agent_id:
                 self._log_channel(agent_id, "channel_disconnected", "{}".format(exc), level="warn")
             else:
@@ -195,14 +202,17 @@ class ChannelHub:
 
     def _authenticate_registration(self, event: Dict[str, Any]) -> str:
         from channel_protocol import ensure_id
+
         agent_id = ensure_id(event.get("agent_id") or event.get("agentId"), "agent_id")
         config = self._config()
         tokens = config.get("tokens") or {}
-        expected = resolve_token(tokens.get(agent_id)) if isinstance(tokens, dict) else None
+        token_value = tokens.get(agent_id) if isinstance(tokens, dict) else None
+        expected = resolve_token(token_value) if token_value else None
         provided = str(event.get("token") or "")
         allow_local = bool(config.get("allow_unauthenticated_local", True)) and is_loopback_host(self._host)
-        if expected:
-            import hmac
+        if token_value:
+            if not expected:
+                raise ValueError("channel token resolution failed")
             if not hmac.compare_digest(str(expected), provided):
                 raise ValueError("invalid channel token")
         elif not allow_local:
@@ -229,8 +239,6 @@ class ChannelHub:
     def publish(self, sender: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Persist and route a channel message. Safe to call outside WebSocket code."""
         message = normalize_message(payload, sender)
-        if self._seen(message["id"]):
-            return message
         room = self._room(message["room_id"])
         members = list(room.get("agents") or [])
         if sender not in members:
@@ -242,7 +250,10 @@ class ChannelHub:
         if not recipients:
             raise ValueError("message has no recipient")
         message["to"] = recipients
-        self._remember(message["id"])
+        with self._dedup_lock:
+            if self._seen(message["id"]):
+                return message
+            self._remember(message["id"])
         append_room_message(
             self.shared_dir,
             message["room_id"],
@@ -299,9 +310,10 @@ class ChannelHub:
         with self._connections_lock:
             websocket = self._connections.get(agent_id)
         if loop and websocket and loop.is_running():
-            asyncio.run_coroutine_threadsafe(
+            future = asyncio.run_coroutine_threadsafe(
                 websocket.send(json.dumps({"type": "message", "message": message}, ensure_ascii=False)), loop
             )
+            future.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
 
     def _seen(self, message_id: str) -> bool:
         return message_id in {str(row.get("id")) for row in self._read_jsonl(self._path("dedup.jsonl"))}
