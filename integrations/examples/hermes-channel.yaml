@@ -1,0 +1,20 @@
+# Copy to a private local path and replace endpoint/token references.
+agent_id: momo
+hub_url: ws://127.0.0.1:8826
+token: ${AGENT_BRIDGE_MOMO_TOKEN}
+
+# Your Hermes native Channel/plugin should expose an inbound message hook.
+inject:
+  url: http://127.0.0.1:18890/agent-bridge/inbound
+  method: POST
+  template:
+    room_id: "{room_id}"
+    from: "{from}"
+    text: "{text}"
+    message_id: "{id}"
+    trace_id: "{trace_id}"
+
+# Configure Hermes's native outbound channel hook to POST normal replies here.
+outbound_listener:
+  host: 127.0.0.1
+  port: 8831
