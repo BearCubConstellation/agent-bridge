@@ -246,14 +246,30 @@ def discover_local_agents(shared_dir, include_bridge_config=True):
             },
         ))
 
-    known_dirs = [
-        ("claude-code", "Claude Code", "Claude", home / ".claude"),
-        ("codex", "Codex", "Codex", home / ".codex"),
-        ("gemini", "Gemini CLI", "Gemini", home / ".gemini"),
-        ("qwen", "Qwen Code", "Qwen", home / ".qwen"),
+    # MCP-capable Agent：Claude Code / OpenCode / Codex / Cursor / Gemini / Qwen
+    # 这类 Agent 自带 MCP client，无需 HTTP webhook — 扫描即用，零配置接入。
+    mcp_capable_agents = [
+        ("claude-code", "Claude Code", "Coding", home / ".claude",      "claude.json"),
+        ("opencode",    "OpenCode",    "Coding", home / ".opencode",    "config.json"),
+        ("codex",       "Codex",       "Coding", home / ".codex",       None),
+        ("cursor",      "Cursor",      "Coding", home / ".cursor",      "mcp.json"),
+        ("gemini",      "Gemini CLI",  "General",home / ".gemini",      None),
+        ("qwen",        "Qwen Code",   "Coding", home / ".qwen",        None),
     ]
-    for aid, name, kind, path in known_dirs:
+    for aid, name, kind, path, _config_file in mcp_capable_agents:
         if path.exists():
-            add(_discovered_agent(aid, name, kind, path, f"检测到 {path.name} 目录"))
+            add(_discovered_agent(
+                aid,
+                name,
+                kind,
+                path,
+                f"检测到 {path.name} — MCP 接入（无需 HTTP 配置）",
+                wakeup=None,  # 不生成 HTTP webhook 配置
+                adapter_override={
+                    "type": "mcp_tool",  # 标记走 MCP 接入
+                    "config": {},
+                    "response": {"mode": "mcp_tool", "timeout_seconds": 300},
+                },
+            ))
 
     return sorted(found.values(), key=lambda x: (x["kind"].lower(), x["id"].lower()))

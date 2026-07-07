@@ -25,6 +25,33 @@ from protocol import (                                        # noqa: E402
 )
 
 
+# ── 通用回写指令注入（提炼自 openclaw_sessions） ──────────
+# 让任何 HTTP-only Agent 收到消息后，都知道怎么把回复送回房间。
+# 不依赖 Agent 自带 MCP 客户端 — 它只要能按指令 POST 或写文件即可。
+
+def build_callback_instruction(room_id, turn_id, correlation_id, callback_url):
+    """构造一段追加到消息正文末尾的回写说明。
+
+    Returns "" 当缺少必要字段（如尚未进入 turn），不追加。
+    """
+    if not (callback_url and turn_id):
+        return ""
+    return (
+        f"\n\n[Agent Bridge 回写指令]\n"
+        f"room_id={room_id}\n"
+        f"turn_id={turn_id}\n"
+        f"correlation_id={correlation_id}\n"
+        f"callback_url={callback_url}\n"
+        f"\n你必须在生成最终回复后，把回复写回 Agent Bridge（任选其一）：\n"
+        f"  1. 【推荐】POST 到上面的 callback_url，请求体 JSON：\n"
+        f'     {{"turn_id": "{turn_id}", "correlation_id": "{correlation_id}", "message": "你的回复内容"}}\n'
+        f"  2. 调用 Agent Bridge 的 MCP tool: agent_bridge.reply_turn\n"
+        f"     （参数 room_id / agent_id / message / turn_id）\n"
+        f"  3. 写文件到房间的 file_outbox 目录\n"
+        f"\n注意：直接在本地会话里回答，对方 Agent 收不到。\n"
+    )
+
+
 def _resolve_path(p):
     """Expand env vars and user home in a path string."""
     return Path(os.path.expandvars(os.path.expanduser(str(p))))
@@ -88,7 +115,13 @@ class NativeHttpAdapter(BaseAdapter):
     # ── wake ─────────────────────────────────────────────
 
     def wake(self, delivery_request: dict) -> dict:
-        """Render body_template with context, make HTTP request, return ticket."""
+        """Render body_template with context, make HTTP request, return ticket.
+
+        通用回写指令注入：所有 HTTP Agent 收到的消息都自带回写说明，
+        让它们知道如何把回复送回房间（POST callback / MCP / file outbox）。
+        这是从 openclaw_sessions 提炼的通用能力，让任何 HTTP-only Agent
+        都能无需专属适配器就接入 Agent Bridge。
+        """
         agent_id = delivery_request.get("agent_id", "")
         message = delivery_request.get("message", "")
         turn_id = delivery_request.get("turn_id", "")
@@ -103,6 +136,15 @@ class NativeHttpAdapter(BaseAdapter):
         cfg = adapter_cfg.get("config", {})
         template = adapter_cfg.get("template", {"message": "{{message}}"})
         auth = adapter_cfg.get("auth", {})
+
+        # 是否注入回写指令（默认 true，可在 agent config 里用 inject_callback=false 关掉）
+        inject_callback = cfg.get("inject_callback", True)
+        if inject_callback:
+            instruction = build_callback_instruction(
+                room_id, turn_id, correlation_id, callback_url
+            )
+            if instruction:
+                message = message + instruction
 
         url = cfg.get("url", "")
         method = cfg.get("method", "POST").upper()

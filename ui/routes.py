@@ -1504,3 +1504,146 @@ def _send_json(handler, data, status=200):
     handler.end_headers()
     handler.wfile.write(body)
     handler.wfile.flush()
+
+
+# ════════════════════════════════════════════════════════════════
+#  MCP HTTP 端点 — 复用 mcp_server.dispatch_request
+#  让任意能发 HTTP 的 Agent 都能调用 MCP tools，无需 stdio
+# ════════════════════════════════════════════════════════════════
+
+def _load_mcp_dispatch():
+    """惰性加载 mcp_server.dispatch_request，避免循环 import / 启动时开销。"""
+    try:
+        from mcp_server import dispatch_request
+        return dispatch_request
+    except Exception as e:
+        logging.warning("MCP dispatch_request 不可用: %s", e)
+        return None
+
+
+def _mcp_context(handler):
+    """构造 MCP dispatch 所需的 context = {shared_dir, config}。"""
+    shared = Path(handler.shared_dir)
+    cfg, _ = read_bridge(shared)
+    return {
+        "shared_dir": str(shared),
+        "config": cfg,
+    }
+
+
+def handle_mcp_jsonrpc(handler):
+    """POST /api/mcp — 标准 JSON-RPC 2.0 over HTTP 入口。
+
+    请求体: {"jsonrpc":"2.0","method":"tools/list","id":1, "params":{...}}
+    响应体: {"jsonrpc":"2.0","id":1,"result":{...}}
+
+    支持 methods: initialize / tools/list / tools/call / notifications/initialized
+    """
+    body, err = _read_json_body(handler)
+    if err:
+        _send_json(handler, {"jsonrpc": "2.0", "id": None,
+                             "error": {"code": -32700, "message": "parse error"}})
+        return
+
+    dispatch = _load_mcp_dispatch()
+    if dispatch is None:
+        _send_json(handler, {"jsonrpc": "2.0", "id": body.get("id"),
+                             "error": {"code": -32603, "message": "MCP server unavailable"}})
+        return
+
+    method = body.get("method", "")
+    params = body.get("params", {}) or {}
+    request_id = body.get("id")
+
+    # notifications（无 id）不响应内容
+    response = dispatch(_mcp_context(handler), method, params, request_id)
+    if response is None:
+        _send_json(handler, {"jsonrpc": "2.0", "ok": True})
+        return
+    _send_json(handler, response)
+
+
+def handle_mcp_tools_list(handler):
+    """GET /api/mcp/tools — 快捷工具列表端点（非 JSON-RPC，方便 curl 调试）。"""
+    from mcp_server import list_tools
+    _send_json(handler, {"ok": True, "tools": list_tools()})
+
+
+def handle_mcp_tools_call(handler, tool_name):
+    """POST /api/mcp/tools/call/{tool_name} — REST 风格快捷调用。
+
+    非 MCP 标准端点，给不想实现完整 JSON-RPC 的 HTTP Agent 用。
+    请求体直接是工具参数，例如：
+        POST /api/mcp/tools/call/agent_bridge.reply_turn
+        {"room_id":"xxx","agent_id":"bob","message":"hello","turn_id":"t1"}
+    """
+    body, err = _read_json_body(handler)
+    if err:
+        _send_json(handler, err)
+        return
+
+    dispatch = _load_mcp_dispatch()
+    if dispatch is None:
+        _send_json(handler, {"ok": False, "error": "MCP server unavailable"})
+        return
+
+    if not isinstance(body, dict):
+        body = {}
+
+    # 包装成标准 tools/call 请求
+    response = dispatch(
+        _mcp_context(handler),
+        "tools/call",
+        {"name": tool_name, "arguments": body},
+        request_id="rest-" + str(uuid.uuid4())[:8],
+    )
+    if response is None:
+        _send_json(handler, {"ok": True})
+        return
+    # 提取 content[].text（标准 MCP tools/call 响应格式）
+    if isinstance(response, dict) and "result" in response:
+        content = response["result"].get("content", [])
+        if content and isinstance(content, list) and content[0].get("text"):
+            try:
+                parsed = json.loads(content[0]["text"])
+                _send_json(handler, {"ok": True, "result": parsed})
+                return
+            except (json.JSONDecodeError, KeyError):
+                pass
+        _send_json(handler, {"ok": True, "result": response["result"]})
+        return
+    # 错误响应原样透传
+    _send_json(handler, response)
+
+
+def handle_mcp_config(handler):
+    """GET /api/mcp/config — 返回 MCP 接入配置（供前端展示给用户复制）。"""
+    shared = Path(handler.shared_dir)
+    cfg, _ = read_bridge(shared)
+    mcp_cfg = cfg.get("mcp", {}) or {}
+    enabled = mcp_cfg.get("enabled", True)
+    # 生成供 Agent 的 mcpServers 配置片段
+    server_cfg = cfg.get("server", {}) or {}
+    host = server_cfg.get("host", "127.0.0.1")
+    port = server_cfg.get("port", 8825)
+    mcp_endpoint = mcp_cfg.get("http_endpoint", "/api/mcp")
+    src_dir = str(Path(__file__).resolve().parent.parent / "core")
+    python_bin = sys.executable or "python3"
+    stdio_config = {
+        "mcpServers": {
+            "agent-bridge": {
+                "command": python_bin,
+                "args": [str(Path(src_dir) / "mcp_server.py"),
+                         "--shared-dir", str(shared)],
+            }
+        }
+    }
+    http_url = f"http://{host}:{port}{mcp_endpoint}"
+    _send_json(handler, {
+        "ok": True,
+        "enabled": enabled,
+        "stdio_config": stdio_config,
+        "http_url": http_url,
+        "rest_call_example": f"POST {http_url}/tools/call/agent_bridge.reply_turn",
+        "tools_count": 6,
+    })

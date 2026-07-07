@@ -311,6 +311,13 @@ def normalize_config(cfg, shared_dir):
         except Exception:
             pass
     cfg["rooms"] = normalized_rooms
+    # MCP 配置（默认启用 stdio 子进程 + HTTP 端点）
+    mcp_cfg = cfg.get("mcp")
+    if not isinstance(mcp_cfg, dict):
+        mcp_cfg = {}
+    mcp_cfg.setdefault("enabled", True)
+    mcp_cfg.setdefault("http_endpoint", "/api/mcp")
+    cfg["mcp"] = mcp_cfg
     return cfg
 
 

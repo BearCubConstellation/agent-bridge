@@ -636,12 +636,51 @@ const Renderer = {
     const adapter = a.adapter || {};
     const type = adapter.type || 'manual';
     const category = categorizeAgent(a);
+    const isMcp = type === 'mcp_tool';
+
+    // MCP 接入 vs HTTP 接入：卡片内容分支
+    const connectionSection = isMcp ? `
+      <div class="form-row full">
+        <label class="form-label">接入方式</label>
+        <div class="mcp-info-box">
+          <div class="mcp-info-icon">🔌</div>
+          <div>
+            <div style="font-weight: 600; color: var(--moss); margin-bottom: 4px;">MCP 接入（零配置）</div>
+            <div class="muted" style="font-size: 12px; line-height: 1.6;">
+              此 Agent 通过 MCP 协议直接接入，无需 HTTP webhook。<br>
+              请将下面的配置添加到 Agent 的 mcpServers 设置中。
+            </div>
+          </div>
+        </div>
+        <div class="mcp-config-block">
+          <div class="mcp-config-label">
+            <span>MCP Server 配置（复制到 Agent 设置）</span>
+            <button class="btn btn-sm btn-ghost" data-action="copyMcpConfig" data-agent-id="${escAttr(a.id)}">复制</button>
+          </div>
+          <pre class="mcp-config-pre" id="mcpConfig-${escAttr(a.id)}">{
+  "mcpServers": {
+    "agent-bridge": {
+      "command": "python3",
+      "args": ["core/mcp_server.py", "--shared-dir", "~/.agent-bridge"]
+    }
+  }
+}</pre>
+        </div>
+      </div>
+    ` : `
+      <div class="form-row full">
+        <label class="form-label">Webhook / 调用 URL</label>
+        <input class="input mono" data-agent-field="wakeup_url" data-agent-id="${escAttr(a.id)}" value="${escAttr(a.wakeup?.url || adapter.config?.url || '')}" placeholder="http://127.0.0.1:8644/webhooks/...">
+      </div>
+    `;
+
     return `
       <div class="agent-card" data-agent-card="${escAttr(a.id)}">
         <div class="agent-card-head">
           <span class="agent-chip agent-chip-lg" style="background:${escAttr(a.color)}">${esc(initials(a.display_name, a.id))}</span>
           <div class="agent-card-name">${esc(a.display_name)}</div>
           ${categoryBadge(category)}
+          ${isMcp ? '<span class="badge badge-mcp">MCP</span>' : ''}
           <span class="agent-card-id">@${esc(a.id)}</span>
         </div>
         <div class="agent-card-form">
@@ -665,12 +704,9 @@ const Renderer = {
               ).join('')}
             </select>
           </div>
-          <div class="form-row full">
-            <label class="form-label">Webhook / 调用 URL</label>
-            <input class="input mono" data-agent-field="wakeup_url" data-agent-id="${escAttr(a.id)}" value="${escAttr(a.wakeup?.url || adapter.config?.url || '')}" placeholder="http://127.0.0.1:8644/webhooks/...">
-          </div>
+          ${connectionSection}
         </div>
-        <details class="agent-adapter-config">
+        ${!isMcp ? `<details class="agent-adapter-config">
           <summary>高级配置（认证 / body 模板）</summary>
           <div class="form-row full" style="margin-top: var(--space-3)">
             <label class="form-label">认证 Token 路径（可选）</label>
@@ -680,7 +716,7 @@ const Renderer = {
             <label class="form-label">Token JSONPath</label>
             <input class="input mono" data-agent-field="token_jsonpath" data-agent-id="${escAttr(a.id)}" value="${escAttr(a.wakeup?.auth?.token_jsonpath || '')}" placeholder="gateway.auth.password">
           </div>
-        </details>
+        </details>` : ''}
         <div class="agent-card-actions">
           <button class="btn btn-sm btn-ghost" data-action="testAgent" data-agent-id="${escAttr(a.id)}">测试</button>
           <button class="btn btn-sm btn-danger" data-action="removeAgent" data-agent-id="${escAttr(a.id)}">删除</button>
@@ -1257,6 +1293,29 @@ const Actions = {
     }
   },
 
+  async copyMcpConfig(agentId) {
+    // 优先用后端 /api/mcp/config 生成的真实配置（含绝对路径）
+    try {
+      const res = await api('/api/mcp/config');
+      const cfg = res.ok ? JSON.stringify(res.stdio_config, null, 2) : '';
+      if (cfg) {
+        await navigator.clipboard.writeText(cfg);
+        Components.toast('MCP 配置已复制到剪贴板');
+        return;
+      }
+    } catch (e) {}
+    // 兜底：用卡片里的 pre 文本
+    const pre = $(`#mcpConfig-${agentId}`);
+    if (pre) {
+      try {
+        await navigator.clipboard.writeText(pre.textContent);
+        Components.toast('MCP 配置已复制');
+      } catch (e) {
+        Components.toast('复制失败，请手动选中复制', 'error');
+      }
+    }
+  },
+
   async testAgent(agentId) {
     const agent = Store.getAgent(agentId);
     if (!agent) return;
@@ -1406,6 +1465,7 @@ const Events = {
     saveAgent(target) { Actions.saveAgent(target.dataset.agentId); },
     removeAgent(target) { Actions.removeAgent(target.dataset.agentId); },
     testAgent(target) { Actions.testAgent(target.dataset.agentId); },
+    copyMcpConfig(target) { Actions.copyMcpConfig(target.dataset.agentId); },
     saveSettings() { Actions.saveSettings(); },
     openSharedDir() { Actions.openSharedDir(); },
     closeModal() { target.closest('.modal-overlay')?.remove(); },

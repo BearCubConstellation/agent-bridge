@@ -40,6 +40,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
 
     shared_dir = None
     poll_manager = None
+    mcp_manager = None
 
     def send_error(self, code, message=None, explain=None):
         """覆写基类，为错误响应也添加安全头。"""
@@ -65,6 +66,8 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "/api/bridge/yaml": lambda: routes.handle_bridge_yaml(self),
             "/api/rooms": lambda: routes.handle_get_rooms(self),
             "/api/settings": lambda: routes.handle_get_settings(self),
+            "/api/mcp/tools": lambda: routes.handle_mcp_tools_list(self),
+            "/api/mcp/config": lambda: routes.handle_mcp_config(self),
         }
         if path in route_map:
             route_map[path]()
@@ -99,6 +102,7 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             "/api/rooms": lambda: routes.handle_save_room(self),
             "/api/rooms/delete": lambda: routes.handle_delete_room(self),
             "/api/settings": lambda: routes.handle_update_settings(self),
+            "/api/mcp": lambda: routes.handle_mcp_jsonrpc(self),
         }
         handler = route_map.get(parsed.path)
         if handler:
@@ -109,6 +113,10 @@ class BridgeHandler(http.server.SimpleHTTPRequestHandler):
             # PUT /api/agents/{agent_id} — single agent update
             agent_id = parsed.path.rstrip("/").split("/")[-1]
             routes.handle_update_single_agent(self, agent_id)
+        elif parsed.path.startswith("/api/mcp/tools/call/"):
+            # POST /api/mcp/tools/call/{tool_name} — REST 风格快捷调用
+            tool_name = parsed.path.rstrip("/").split("/")[-1]
+            routes.handle_mcp_tools_call(self, tool_name)
         else:
             self.send_error(404)
 
@@ -179,11 +187,33 @@ def main():
         print("[main] bridge.yaml not found, Scheduler not auto-started. "
               "Will be started on first PollManager cycle.")
 
+    # 启动 stdio MCP server 子进程（让原生 MCP client 能接入）
+    # 受 bridge.yaml 的 mcp.enabled 控制（默认 True）
+    cfg_fresh, _ = read_bridge(Path(shared_dir))
+    mcp_cfg = cfg_fresh.get("mcp", {}) or {}
+    mcp_enabled = mcp_cfg.get("enabled", True)
+    mcp_mgr = None
+    try:
+        from mcp_manager import MCPManager
+        src_dir = str(Path(__file__).resolve().parent.parent / "core")
+        mcp_mgr = MCPManager(shared_dir, src_dir=src_dir, log_dir=shared_dir)
+        BridgeHandler.mcp_manager = mcp_mgr
+        if mcp_enabled:
+            mcp_mgr.start()
+            import atexit
+            atexit.register(mcp_mgr.stop)
+        else:
+            print("[mcp] stdio MCP server 已在配置中禁用 (mcp.enabled=false)，仅 HTTP 端点可用")
+    except Exception as e:
+        print(f"[mcp] stdio MCP server 启动失败（HTTP MCP 端点仍可用）: {e}")
+
     try:
         server = http.server.HTTPServer((args.host, args.port), BridgeHandler)
     except OSError as e:
         print(f"Error: Cannot bind to {args.host}:{args.port} — {e}")
         print(f"Hint: Port may be in use. Try --port with a different number (e.g. --port {args.port + 1}).")
+        if mcp_mgr:
+            mcp_mgr.stop()
         sys.exit(1)
 
     url = f"http://{args.host}:{args.port}"
@@ -194,6 +224,10 @@ def main():
     print(f"Shared dir: {shared_dir}")
     print(f"URL:        {url}")
     print(f"Polling:    {poll_text}")
+    if mcp_mgr and mcp_mgr.is_alive():
+        print(f"MCP:        stdio (pid={mcp_mgr.pid()}) + HTTP {url}/api/mcp")
+    else:
+        print(f"MCP:        HTTP only ({url}/api/mcp)")
     print("Ctrl+C to stop")
     print("=" * 44)
 
@@ -207,6 +241,8 @@ def main():
         print("\nStopping...")
         sched.stop()
         poll_mgr.stop()
+        if mcp_mgr:
+            mcp_mgr.stop()
         server.server_close()
 
 

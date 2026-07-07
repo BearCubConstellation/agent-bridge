@@ -622,6 +622,53 @@ html[data-theme="dark"] .logo-dark  { display: block; }
 html[data-theme="dark"] .badge-general { color: #6FA0FF; background: rgba(111, 160, 255, 0.12); }
 html[data-theme="dark"] .badge-coding   { color: #FF8AA0; background: rgba(255, 138, 160, 0.12); }
 
+/* ── MCP 接入标签 + 配置块 ── */
+.badge-mcp {
+  color: var(--moss);
+  background: var(--moss-bg);
+  border-color: transparent;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.mcp-info-box {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--moss-bg);
+  border: 1px solid var(--moss-lo);
+  border-radius: var(--radius);
+  margin-top: var(--space-2);
+}
+.mcp-info-icon { font-size: 24px; line-height: 1.2; }
+.mcp-config-block {
+  margin-top: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.mcp-config-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--font-size-xs);
+  color: var(--ink);
+  font-family: var(--font-mono);
+}
+.mcp-config-pre {
+  margin: 0;
+  padding: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: 1.6;
+  color: var(--paper-dim);
+  background: var(--surface);
+  overflow-x: auto;
+  white-space: pre;
+}
+
 /* ── Agent chip（小圆形头像） ── */
 .agent-chip {
   display: inline-flex;
