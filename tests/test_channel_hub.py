@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import sys
 import tempfile
 import unittest
@@ -56,6 +57,12 @@ class ChannelHubTests(unittest.TestCase):
         self.assertTrue(self.hub.validate_exposure("0.0.0.0"))
         self.config["channel"]["tokens"] = {"susu": "secret"}
         self.assertEqual("", self.hub.validate_exposure("0.0.0.0"))
+
+    def test_registration_rejects_unresolved_configured_token(self):
+        self.config["channel"]["tokens"] = {"susu": "${AGENT_BRIDGE_MISSING_TEST_TOKEN}"}
+        os.environ.pop("AGENT_BRIDGE_MISSING_TEST_TOKEN", None)
+        with self.assertRaisesRegex(ValueError, "resolution"):
+            self.hub._authenticate_registration({"agent_id": "susu", "token": ""})
 
 
 if __name__ == "__main__":
